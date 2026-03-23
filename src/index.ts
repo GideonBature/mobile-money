@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { transactionRoutes } from './routes/transactions';
+import { bulkRoutes } from './routes/bulk';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -26,6 +27,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/transactions/bulk', bulkRoutes);
 
 app.use(errorHandler);
 
