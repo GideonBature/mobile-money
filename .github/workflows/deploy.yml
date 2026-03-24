@@ -1,0 +1,135 @@
+name: CD - Staging Deployment
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Pull Docker image
+        run: |
+          echo "Pulling Docker image for commit: ${{ github.event.workflow_run.head_sha }}"
+          docker pull ${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+          echo "Image pulled successfully!"
+
+      - name: Validate environment variables
+        run: |
+          echo "Validating required environment variables..."
+          MISSING_VARS=()
+          
+          # Check required environment variables
+          [ -z "${{ secrets.DATABASE_URL }}" ] && MISSING_VARS+=("DATABASE_URL")
+          [ -z "${{ secrets.REDIS_URL }}" ] && MISSING_VARS+=("REDIS_URL")
+          [ -z "${{ secrets.STELLAR_NETWORK }}" ] && MISSING_VARS+=("STELLAR_NETWORK")
+          [ -z "${{ secrets.STELLAR_HORIZON_URL }}" ] && MISSING_VARS+=("STELLAR_HORIZON_URL")
+          [ -z "${{ secrets.STELLAR_ISSUER_SECRET }}" ] && MISSING_VARS+=("STELLAR_ISSUER_SECRET")
+          
+          if [ ${#MISSING_VARS[@]} -ne 0 ]; then
+            echo "Error: Missing required environment variables:"
+            printf '  - %s\n' "${MISSING_VARS[@]}"
+            exit 1
+          fi
+          
+          echo "✅ All required environment variables are present"
+
+      - name: Deploy to staging
+        run: |
+          echo "Deploying to staging environment..."
+          
+          # Stop existing containers if running
+          docker compose -f docker-compose.yml down || true
+          
+          # Set the image tag to use the commit SHA
+          export IMAGE_TAG=${{ github.event.workflow_run.head_sha }}
+          
+          # Deploy using docker-compose with the pulled image
+          docker compose -f docker-compose.yml up -d
+          
+          echo "✅ Deployment initiated successfully"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          STELLAR_NETWORK: ${{ secrets.STELLAR_NETWORK }}
+          STELLAR_HORIZON_URL: ${{ secrets.STELLAR_HORIZON_URL }}
+          STELLAR_ISSUER_SECRET: ${{ secrets.STELLAR_ISSUER_SECRET }}
+          MTN_API_KEY: ${{ secrets.MTN_API_KEY }}
+          MTN_API_SECRET: ${{ secrets.MTN_API_SECRET }}
+          MTN_SUBSCRIPTION_KEY: ${{ secrets.MTN_SUBSCRIPTION_KEY }}
+          AIRTEL_API_KEY: ${{ secrets.AIRTEL_API_KEY }}
+          AIRTEL_API_SECRET: ${{ secrets.AIRTEL_API_SECRET }}
+          ORANGE_API_KEY: ${{ secrets.ORANGE_API_KEY }}
+          ORANGE_API_SECRET: ${{ secrets.ORANGE_API_SECRET }}
+          REQUEST_TIMEOUT_MS: ${{ secrets.REQUEST_TIMEOUT_MS }}
+
+      - name: Health check verification
+        run: |
+          echo "Starting health check verification..."
+          
+          STAGING_URL="${{ secrets.STAGING_URL }}"
+          HEALTH_ENDPOINT="${STAGING_URL}/health/lb"
+          TIMEOUT=300  # 5 minutes in seconds
+          INTERVAL=10  # 10 seconds between checks
+          ELAPSED=0
+          
+          echo "Health check endpoint: ${HEALTH_ENDPOINT}"
+          echo "Timeout: ${TIMEOUT}s, Interval: ${INTERVAL}s"
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            echo "Checking health (attempt $((ELAPSED / INTERVAL + 1)))..."
+            
+            # Perform health check
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_ENDPOINT}" || echo "000")
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Health check passed! Application is healthy."
+              
+              # Get detailed health status
+              HEALTH_RESPONSE=$(curl -s "${HEALTH_ENDPOINT}")
+              echo "Health check response:"
+              echo "${HEALTH_RESPONSE}"
+              
+              exit 0
+            fi
+            
+            echo "⏳ Health check returned status ${HTTP_CODE}, waiting ${INTERVAL}s..."
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          echo "Health check failed: Timeout after ${TIMEOUT}s"
+          echo "Fetching container logs for debugging..."
+          docker compose -f docker-compose.yml logs --tail=50
+          exit 1
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "Deployment to staging failed!"
+          echo "Commit SHA: ${{ github.event.workflow_run.head_sha }}"
+          echo "Triggered by: ${{ github.event.workflow_run.head_commit.author.name }}"
+          echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          # In a real scenario, this would send notifications via Slack, email, etc.
+          # Example: curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} -d '{"text":"Deployment failed!"}'
+          
+          echo "Collecting diagnostic information..."
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs --tail=100

@@ -5,7 +5,7 @@ import {
   TRANSACTION_QUEUE_NAME,
 } from "./transactionQueue";
 import { queueOptions } from "./config";
-import { TransactionModel } from "../models/transaction";
+import { TransactionModel, TransactionStatus } from "../models/transaction";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { StellarService } from "../services/stellar/stellarService";
 
@@ -65,7 +65,7 @@ export const transactionWorker = new Worker<
 
         await job.updateProgress(90);
 
-        await transactionModel.updateStatus(transactionId, "completed");
+        await transactionModel.updateStatus(transactionId, TransactionStatus.Completed);
 
         await job.updateProgress(100);
 
@@ -96,7 +96,7 @@ export const transactionWorker = new Worker<
 
         await job.updateProgress(90);
 
-        await transactionModel.updateStatus(transactionId, "completed");
+        await transactionModel.updateStatus(transactionId, TransactionStatus.Completed);
 
         await job.updateProgress(100);
 
@@ -111,7 +111,7 @@ export const transactionWorker = new Worker<
       }
     } catch (error) {
       console.error(`[${job.id}] Transaction failed:`, error);
-      await transactionModel.updateStatus(transactionId, "failed");
+      await transactionModel.updateStatus(transactionId, TransactionStatus.Failed);
       throw error;
     }
   },

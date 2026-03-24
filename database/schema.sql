@@ -18,4 +18,4 @@ CREATE INDEX idx_transactions_reference_number ON transactions(reference_number)
 
 -- Tags: array of short lowercase strings for categorization (e.g. "refund", "priority", "verified")
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
-CREATE INDEX idx_transactions_tags ON transactions USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_transactions_tags ON transactions USING GIN (tags);

@@ -25,7 +25,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer, { MulterError } from 'multer';
 import csvParser from 'csv-parser';
 import { Readable } from 'stream';
-import { TransactionModel } from '../models/transaction';
+import { TransactionModel, TransactionStatus } from '../models/transaction';
 import { MobileMoneyService } from '../services/mobilemoney/mobileMoneyService';
 import { StellarService } from '../services/stellar/stellarService';
 
@@ -162,7 +162,7 @@ async function processJob(jobId: string, rows: CsvRow[]): Promise<void> {
         phoneNumber: row.phoneNumber,
         provider: row.provider.toUpperCase(),
         stellarAddress: row.stellarAddress,
-        status: 'pending',
+        status: TransactionStatus.Pending,
         tags: [],
       });
 
@@ -174,9 +174,9 @@ async function processJob(jobId: string, rows: CsvRow[]): Promise<void> {
 
       if (mobileResult.success && stellarService) {
         await stellarService.sendPayment(row.stellarAddress, row.amount);
-        await transactionModel.updateStatus(transaction.id, 'completed');
+        await transactionModel.updateStatus(transaction.id, TransactionStatus.Completed);
       } else {
-        await transactionModel.updateStatus(transaction.id, 'failed');
+        await transactionModel.updateStatus(transaction.id, TransactionStatus.Failed);
       }
 
       job.succeeded++;

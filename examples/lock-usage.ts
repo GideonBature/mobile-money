@@ -3,7 +3,7 @@
  */
 
 import { lockManager, LockKeys } from '../src/utils/lock';
-import { TransactionModel } from '../src/models/transaction';
+import { TransactionModel, TransactionStatus } from '../src/models/transaction';
 
 const transactionModel = new TransactionModel();
 
@@ -22,7 +22,7 @@ export async function createTransactionSafely(
   return await lockManager.withLock(lockKey, async () => {
     // Check for existing pending transaction
     const existing = await transactionModel.findById(phoneNumber);
-    if (existing && existing.status === 'pending') {
+    if (existing && existing.status === TransactionStatus.Pending) {
       throw new Error('Transaction already in progress for this phone number');
     }
     
@@ -33,7 +33,7 @@ export async function createTransactionSafely(
       phoneNumber,
       provider,
       stellarAddress,
-      status: 'pending'
+      status: TransactionStatus.Pending
     });
   }, 15000);
 }
@@ -52,7 +52,7 @@ export async function processTransactionSafely(transactionId: string) {
       throw new Error('Transaction not found');
     }
     
-    if (tx.status !== 'pending') {
+    if (tx.status !== TransactionStatus.Pending) {
       throw new Error('Transaction already processed');
     }
     
@@ -62,7 +62,7 @@ export async function processTransactionSafely(transactionId: string) {
     // Simulate processing
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    await transactionModel.updateStatus(transactionId, 'completed');
+    await transactionModel.updateStatus(transactionId, TransactionStatus.Completed);
     
     return tx;
   }, 30000);

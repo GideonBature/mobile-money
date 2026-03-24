@@ -13,7 +13,18 @@ spec:
     metadata:
       labels:
         app: mobile-money
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
     spec:
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - "until pg_isready -h postgres-service -p 5432; do echo waiting for database; sleep 2; done;"
       containers:
       - name: mobile-money
         image: shantelpeters/mobile-money:latest
@@ -40,7 +51,7 @@ spec:
           failureThreshold: 3
         livenessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 3000
           initialDelaySeconds: 10
           periodSeconds: 20

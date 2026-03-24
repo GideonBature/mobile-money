@@ -7,6 +7,8 @@ coverage/
 .nyc_output/
 *.tsbuildinfo
 
+.kiro/
+
 # Issue creation and update scripts (local use only)
 create-issues.sh
 create-all-issues.sh
