@@ -9,8 +9,6 @@ import { connectRedis } from './config/redis';
 import { globalTimeout, haltOnTimedout, timeoutErrorHandler } from './middleware/timeout';
 import { responseTime } from './middleware/responseTime';
 
-dotenv.config();
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -38,7 +36,11 @@ app.get("/health", (req, res) => {
 
 app.use('/api/transactions', transactionRoutes);
 
-// Timeout error handler (must be before general error handler)
+// Queue dashboard
+const queueRouter = createQueueDashboard();
+app.use("/admin/queues", queueRouter);
+
+// Error handling
 app.use(timeoutErrorHandler);
 app.use(errorHandler);
 
@@ -49,7 +51,6 @@ connectRedis()
   })
   .catch((err) => {
     console.error("Failed to connect to Redis:", err);
-    console.warn("Distributed locks will not be available");
   });
 
 app.listen(PORT, () => {
