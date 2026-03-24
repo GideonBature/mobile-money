@@ -2,8 +2,13 @@ import { MTNProvider } from './providers/mtn';
 import { AirtelProvider } from './providers/airtel';
 import { OrangeProvider } from './providers/orange';
 
+interface MobileMoneyProvider {
+  requestPayment(phoneNumber: string, amount: string): Promise<{ success: boolean; data?: unknown; error?: unknown }>;
+  sendPayout(phoneNumber: string, amount: string): Promise<{ success: boolean; data?: unknown; error?: unknown }>;
+}
+
 export class MobileMoneyService {
-  private providers: Map<string, any>;
+  private providers: Map<string, MobileMoneyProvider>;
 
   constructor() {
     this.providers = new Map([

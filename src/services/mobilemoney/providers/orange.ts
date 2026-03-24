@@ -1,9 +1,9 @@
 export class OrangeProvider {
-  async requestPayment(phoneNumber: string, amount: string) {
+  async requestPayment(_phoneNumber: string, _amount: string) {
     return { success: true };
   }
 
-  async sendPayout(phoneNumber: string, amount: string) {
+  async sendPayout(_phoneNumber: string, _amount: string) {
     return { success: true };
   }
 }

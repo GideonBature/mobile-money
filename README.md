@@ -1,5 +1,8 @@
 # Mobile Money to Stellar Backend
+
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/sublime247/mobile-money/issues)
+[![codecov](https://codecov.io/gh/sublime247/mobile-money/branch/main/graph/badge.svg)](https://codecov.io/gh/sublime247/mobile-money)
+[![CI](https://github.com/sublime247/mobile-money/workflows/CI/badge.svg)](https://github.com/sublime247/mobile-money/actions)
 
 A backend service that bridges mobile money providers (MTN, Airtel, Orange) with the Stellar blockchain network.
 
@@ -67,6 +70,28 @@ npm run docker:dev:down
 ```
 
 Attach a debugger (e.g. VS Code) to `localhost:9229`.
+
+## Testing
+
+### Run Tests
+```bash
+npm test
+```
+
+### Run Tests with Coverage
+```bash
+npm run test:coverage
+```
+
+### Watch Mode
+```bash
+npm run test:watch
+```
+
+### Coverage Requirements
+- Minimum coverage: 70% (branches, functions, lines, statements)
+- Coverage reports uploaded to Codecov automatically
+- View detailed reports: https://codecov.io/gh/sublime247/mobile-money
 
 ## API Endpoints
 

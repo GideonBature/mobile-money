@@ -21,7 +21,7 @@
  *     Returns current status of the bulk import job.
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer, { MulterError } from 'multer';
 import csvParser from 'csv-parser';
 import { Readable } from 'stream';
@@ -163,6 +163,7 @@ async function processJob(jobId: string, rows: CsvRow[]): Promise<void> {
         provider: row.provider.toUpperCase(),
         stellarAddress: row.stellarAddress,
         status: 'pending',
+        tags: [],
       });
 
       const mobileResult = await mobileMoneyService.initiatePayment(
@@ -289,7 +290,7 @@ bulkRoutes.post('/', upload.single('file'), async (req: Request, res: Response) 
 });
 
 // Handle multer errors (file size, wrong type)
-bulkRoutes.use((err: unknown, _req: Request, res: Response, next: Function) => {
+bulkRoutes.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
   if (err instanceof MulterError && err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: 'File too large — maximum size is 10 MB' });
   }

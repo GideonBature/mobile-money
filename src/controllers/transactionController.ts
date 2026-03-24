@@ -22,7 +22,8 @@ export const depositHandler = async (req: Request, res: Response) => {
           phoneNumber,
           provider,
           stellarAddress,
-          status: 'pending'
+          status: 'pending',
+          tags: []
         });
 
         const mobileMoneyResult = await mobileMoneyService.initiatePayment(
@@ -60,7 +61,8 @@ export const withdrawHandler = async (req: Request, res: Response) => {
       phoneNumber,
       provider,
       stellarAddress,
-      status: 'pending'
+      status: 'pending',
+      tags: []
     });
 
     res.json({ transactionId: transaction.id, status: 'pending' });

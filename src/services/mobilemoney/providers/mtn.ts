@@ -38,7 +38,7 @@ export class MTNProvider {
     }
   }
 
-  async sendPayout(phoneNumber: string, amount: string) {
+  async sendPayout(_phoneNumber: string, _amount: string) {
     return { success: true };
   }
 }

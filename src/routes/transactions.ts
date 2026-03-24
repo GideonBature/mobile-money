@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { depositHandler, withdrawHandler, getTransactionHandler } from '../controllers/transactionController';
-import { TimeoutPresets, customTimeout, haltOnTimedout } from '../middleware/timeout';
+import { TimeoutPresets, haltOnTimedout } from '../middleware/timeout';
 
 export const transactionRoutes = Router();
 
