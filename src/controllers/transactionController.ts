@@ -199,7 +199,7 @@ export const cancelTransactionHandler = async (req: Request, res: Response) => {
       });
     }
 
-    const updatedTransaction = await transactionModel.updateStatus(id, "cancelled" );
+    const updatedTransaction = await transactionModel.updateStatus(id, TransactionStatus.Cancelled);
 
     console.log("Transaction cancelled", {
       transactionId: id,
