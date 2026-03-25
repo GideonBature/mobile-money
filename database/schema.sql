@@ -1,3 +1,30 @@
+-- Users table for KYC-based transaction limits
+CREATE TABLE IF NOT EXISTS users (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone_number  VARCHAR(20) UNIQUE NOT NULL,
+  kyc_level     VARCHAR(20) NOT NULL CHECK (kyc_level IN ('unverified', 'basic', 'full')),
+  created_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_phone_number ON users(phone_number);
+CREATE INDEX IF NOT EXISTS idx_users_kyc_level ON users(kyc_level);
+
+-- Auto-update updated_at on users
+CREATE OR REPLACE FUNCTION update_users_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS users_updated_at ON users;
+CREATE TRIGGER users_updated_at
+  BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION update_users_updated_at();
+
+-- Transactions table
 CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   reference_number VARCHAR(25) UNIQUE NOT NULL,
@@ -11,11 +38,18 @@ CREATE TABLE IF NOT EXISTS transactions (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_transactions_status ON transactions(status);
-CREATE INDEX idx_transactions_stellar_address ON transactions(stellar_address);
-CREATE INDEX idx_transactions_created_at ON transactions(created_at);
-CREATE INDEX idx_transactions_reference_number ON transactions(reference_number);
+CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
+CREATE INDEX IF NOT EXISTS idx_transactions_stellar_address ON transactions(stellar_address);
+CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
+CREATE INDEX IF NOT EXISTS idx_transactions_reference_number ON transactions(reference_number);
 
 -- Tags: array of short lowercase strings for categorization (e.g. "refund", "priority", "verified")
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
-CREATE INDEX idx_transactions_tags ON transactions USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_transactions_tags ON transactions USING GIN (tags);
+
+-- Add user_id foreign key to link transactions to users for KYC-based daily limit tracking
+ALTER TABLE transactions 
+ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_user_created ON transactions(user_id, created_at);

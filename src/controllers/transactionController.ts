@@ -3,14 +3,38 @@ import { StellarService } from '../services/stellar/stellarService';
 import { MobileMoneyService } from '../services/mobilemoney/mobileMoneyService';
 import { TransactionModel } from '../models/transaction';
 import { lockManager, LockKeys } from '../utils/lock';
+import { TransactionLimitService } from '../services/transactionLimit/transactionLimitService';
+import { KYCService } from '../services/kyc/kycService';
 
 const stellarService = new StellarService();
 const mobileMoneyService = new MobileMoneyService();
 const transactionModel = new TransactionModel();
+const kycService = new KYCService();
+const transactionLimitService = new TransactionLimitService(kycService, transactionModel);
 
 export const depositHandler = async (req: Request, res: Response) => {
   try {
-    const { amount, phoneNumber, provider, stellarAddress } = req.body;
+    const { amount, phoneNumber, provider, stellarAddress, userId } = req.body;
+    
+    // Validate transaction limit
+    const limitCheck = await transactionLimitService.checkTransactionLimit(
+      userId,
+      parseFloat(amount)
+    );
+    
+    if (!limitCheck.allowed) {
+      return res.status(400).json({
+        error: 'Transaction limit exceeded',
+        details: {
+          kycLevel: limitCheck.kycLevel,
+          dailyLimit: limitCheck.dailyLimit,
+          currentDailyTotal: limitCheck.currentDailyTotal,
+          remainingLimit: limitCheck.remainingLimit,
+          message: limitCheck.message,
+          upgradeAvailable: limitCheck.upgradeAvailable
+        }
+      });
+    }
     
     // Use distributed lock to prevent duplicate transactions from same phone number
     const result = await lockManager.withLock(
@@ -53,7 +77,27 @@ export const depositHandler = async (req: Request, res: Response) => {
 
 export const withdrawHandler = async (req: Request, res: Response) => {
   try {
-    const { amount, phoneNumber, provider, stellarAddress } = req.body;
+    const { amount, phoneNumber, provider, stellarAddress, userId } = req.body;
+    
+    // Validate transaction limit
+    const limitCheck = await transactionLimitService.checkTransactionLimit(
+      userId,
+      parseFloat(amount)
+    );
+    
+    if (!limitCheck.allowed) {
+      return res.status(400).json({
+        error: 'Transaction limit exceeded',
+        details: {
+          kycLevel: limitCheck.kycLevel,
+          dailyLimit: limitCheck.dailyLimit,
+          currentDailyTotal: limitCheck.currentDailyTotal,
+          remainingLimit: limitCheck.remainingLimit,
+          message: limitCheck.message,
+          upgradeAvailable: limitCheck.upgradeAvailable
+        }
+      });
+    }
     
     const transaction = await transactionModel.create({
       type: 'withdraw',

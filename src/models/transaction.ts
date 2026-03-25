@@ -103,4 +103,23 @@ export class TransactionModel {
     );
     return result.rows[0] || null;
   }
+
+  /**
+   * Find completed transactions for a user since a given date.
+   * Used for calculating daily transaction totals within a rolling 24-hour window.
+   * @param userId - The user's ID
+   * @param since - The start date for the time window
+   * @returns Array of completed transactions ordered by created_at DESC
+   */
+  async findCompletedByUserSince(userId: string, since: Date): Promise<Transaction[]> {
+    const result = await pool.query(
+      `SELECT * FROM transactions 
+       WHERE user_id = $1 
+       AND status = 'completed' 
+       AND created_at >= $2
+       ORDER BY created_at DESC`,
+      [userId, since]
+    );
+    return result.rows;
+  }
 }

@@ -93,6 +93,46 @@ npm run test:watch
 - Coverage reports uploaded to Codecov automatically
 - View detailed reports: https://codecov.io/gh/sublime247/mobile-money
 
+## KYC Transaction Limits
+
+The system enforces daily transaction limits based on user KYC (Know Your Customer) verification levels to prevent fraud while encouraging users to complete higher levels of verification.
+
+### KYC Levels and Daily Limits
+
+| KYC Level | Daily Limit | Description |
+|-----------|-------------|-------------|
+| Unverified | 10,000 XAF | Default level for new users |
+| Basic | 100,000 XAF | Requires basic identity verification |
+| Full | 1,000,000 XAF | Requires complete identity verification |
+
+### How Limits Are Enforced
+
+- Limits are calculated using a **rolling 24-hour window** from the current time
+- Both deposit and withdrawal transactions count toward the daily total
+- Only completed transactions are included in the calculation
+- Limits are checked before each transaction is processed
+- If a transaction would exceed the limit, it is rejected with a detailed error message
+
+### Configuration
+
+Transaction limits can be configured via environment variables:
+
+```bash
+LIMIT_UNVERIFIED=10000    # Daily limit for unverified users (XAF)
+LIMIT_BASIC=100000        # Daily limit for basic KYC users (XAF)
+LIMIT_FULL=1000000        # Daily limit for full KYC users (XAF)
+```
+
+If not specified, the system uses the default values shown above.
+
+### Benefits of Upgrading KYC Levels
+
+- **Unverified → Basic**: Increase your daily limit from 10,000 XAF to 100,000 XAF (10x increase)
+- **Basic → Full**: Increase your daily limit from 100,000 XAF to 1,000,000 XAF (10x increase)
+- Higher limits enable larger transactions and better support for business use cases
+
+When a transaction is rejected due to limit exceeded, the error response includes your current KYC level, remaining limit, and upgrade suggestions.
+
 ## API Endpoints
 
 ### Health Check
