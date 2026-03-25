@@ -2,6 +2,10 @@ import * as StellarSdk from "stellar-sdk";
 import { getStellarServer, getNetworkPassphrase } from "../../config/stellar";
 import dotenv from "dotenv";
 import { transactionTotal, transactionErrorsTotal } from "../../utils/metrics";
+import {
+  AssetService,
+  getConfiguredPaymentAsset,
+} from "./assetService";
 
 dotenv.config();
 
@@ -24,6 +28,7 @@ export class StellarService {
   private server: StellarSdk.Horizon.Server;
   private issuerKeypair: StellarSdk.Keypair | null = null;
   private isMockMode: boolean = false;
+  private assetService = new AssetService();
 
   // Simple in-memory cache for recent transaction history results
   private historyCache: Map<
@@ -64,6 +69,19 @@ export class StellarService {
       }
 
       // REAL MODE
+      const paymentAsset = getConfiguredPaymentAsset();
+      if (!paymentAsset.isNative()) {
+        const trusted = await this.assetService.hasTrustline(
+          destinationAddress,
+          paymentAsset,
+        );
+        if (!trusted) {
+          throw new Error(
+            `Recipient has no trustline for ${paymentAsset.getCode()}. Add a trustline before paying this asset.`,
+          );
+        }
+      }
+
       const account = await this.server.loadAccount(
         this.issuerKeypair.publicKey(),
       );
@@ -75,7 +93,7 @@ export class StellarService {
         .addOperation(
           StellarSdk.Operation.payment({
             destination: destinationAddress,
-            asset: StellarSdk.Asset.native(),
+            asset: paymentAsset,
             amount: amount,
           }),
         )
@@ -109,16 +127,14 @@ export class StellarService {
 
   async getBalance(address: string): Promise<string> {
     try {
+      const asset = getConfiguredPaymentAsset();
       // MOCK MODE
       if (this.isMockMode) {
-        console.log("Mock balance check for:", address);
-        return "1000"; // fake balance
+        console.log("Mock balance check for:", address, asset.getCode());
+        return "1000";
       }
 
-      const account = await this.server.loadAccount(address);
-      const balance = account.balances.find((b) => b.asset_type === "native");
-
-      return balance ? balance.balance : "0";
+      return this.assetService.getAssetBalance(address, asset);
     } catch (error) {
       console.error("Balance fetch failed", error);
       return "0";

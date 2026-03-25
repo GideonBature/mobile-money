@@ -1,7 +1,11 @@
-import request from 'supertest';
-import app from '../src/index'; // Adjust path if your index is in a different folder
+import request from "supertest";
+import app from "../src/index";
+import { shutdownQueue } from "../src/queue";
 
-describe('Transaction History Integration Tests', () => {
+describe("Transaction History Integration Tests", () => {
+  afterAll(async () => {
+    await shutdownQueue().catch(() => undefined);
+  });
   
   // Test 1: Validate Date Format
   it('should return 400 for invalid date formats', async () => {
@@ -21,14 +25,20 @@ describe('Transaction History Integration Tests', () => {
     expect(res.body.error).toBe('startDate cannot be greater than endDate');
   });
 
-  // Test 3: Successful Filtering & Pagination
-  it('should return 200 and paginated data for valid ranges', async () => {
-    const res = await request(app)
-      .get('/api/transactions?startDate=2026-03-01&endDate=2026-03-31&page=1&limit=5');
-    
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.pagination).toEqual({ page: 1, limit: 5 });
-    expect(Array.isArray(res.body.data)).toBe(true);
-  });
+  // Test 3: Successful filtering & pagination (requires DATABASE_URL + migrations)
+  (process.env.DATABASE_URL ? it : it.skip)(
+    "should return 200 and paginated data for valid ranges",
+    async () => {
+      const res = await request(app)
+        .get(
+          "/api/transactions?startDate=2026-03-01&endDate=2026-03-31&page=1&limit=5",
+        );
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.pagination).toMatchObject({ page: 1, limit: 5 });
+      expect(res.body.pagination).toHaveProperty("total_records");
+      expect(Array.isArray(res.body.data)).toBe(true);
+    },
+  );
 });

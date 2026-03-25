@@ -29,7 +29,7 @@ import {
   DisputeStatus,
   ReportFilter,
 } from "../models/dispute";
-import { TransactionModel } from "../models/transaction";
+import { TransactionModel, TransactionStatus } from "../models/transaction";
 
 // ---------------------------------------------------------------------------
 // Allowed status transitions
@@ -92,6 +92,15 @@ export class DisputeService {
     const transaction = await this.transactionModel.findById(transactionId);
     if (!transaction) {
       throw new Error(`Transaction ${transactionId} not found`);
+    }
+
+    if (
+      transaction.status !== TransactionStatus.Completed &&
+      transaction.status !== TransactionStatus.Failed
+    ) {
+      throw new Error(
+        `Disputes are only allowed for completed or failed transactions (current status: ${transaction.status})`,
+      );
     }
 
     const existing =

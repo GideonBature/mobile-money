@@ -16,6 +16,7 @@ export const typeDefs = gql`
     stellarAddress: String!
     status: String!
     tags: [String!]!
+    retryCount: Int
     createdAt: String!
     jobProgress: Float
   }

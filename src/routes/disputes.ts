@@ -75,7 +75,9 @@ transactionDisputeRoutes.post(
         ? 404
         : message.includes("already exists")
           ? 409
-          : 500;
+          : message.includes("only allowed for completed")
+            ? 422
+            : 500;
       return res.status(status).json({ error: message });
     }
   },

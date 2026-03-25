@@ -12,6 +12,7 @@ export interface MappedTransaction {
   stellarAddress: string;
   status: string;
   tags: string[];
+  retryCount?: number;
   createdAt: string;
 }
 
@@ -31,6 +32,8 @@ export function mapTransactionRow(row: Record<string, unknown>): MappedTransacti
     tags?: string[];
     created_at?: Date;
     createdAt?: Date;
+    retry_count?: number;
+    retryCount?: number;
   };
   const created = r.created_at ?? r.createdAt;
   return {
@@ -43,6 +46,7 @@ export function mapTransactionRow(row: Record<string, unknown>): MappedTransacti
     stellarAddress: String(r.stellar_address ?? r.stellarAddress ?? ""),
     status: String(r.status ?? ""),
     tags: Array.isArray(r.tags) ? r.tags.map(String) : [],
+    retryCount: Number(r.retry_count ?? r.retryCount ?? 0),
     createdAt:
       created instanceof Date ? created.toISOString() : String(created ?? ""),
   };

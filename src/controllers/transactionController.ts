@@ -3,6 +3,7 @@ import { z } from "zod";
 import { StellarService } from "../services/stellar/stellarService";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { TransactionModel, TransactionStatus } from "../models/transaction";
+import { pool } from "../config/database";
 import { lockManager, LockKeys } from "../utils/lock";
 import { TransactionLimitService } from "../services/transactionLimit/transactionLimitService";
 import { KYCService } from "../services/kyc/kycService";
@@ -61,14 +62,16 @@ export const getTransactionHistoryHandler = async (req: Request, res: Response) 
   try {
     const { startDate, endDate, page = "1", limit = "10" } = req.query;
 
-    // 1. Validate ISO 8601 Format
-    const isValidISO = (dateStr: any) => {
+    // 1. Validate calendar date (YYYY-MM-DD) — reject DD-MM-YYYY etc.
+    const isValidYmd = (dateStr: unknown) => {
       if (!dateStr) return true;
-      const d = new Date(dateStr as string);
-      return !isNaN(d.getTime()) && (dateStr as string).includes('-');
+      const s = String(dateStr).trim();
+      if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return false;
+      const d = new Date(s);
+      return !isNaN(d.getTime());
     };
 
-    if (!isValidISO(startDate) || !isValidISO(endDate)) {
+    if (!isValidYmd(startDate) || !isValidYmd(endDate)) {
       return res.status(400).json({ error: "Invalid date format. Please use ISO 8601 (YYYY-MM-DD)" });
     }
 
@@ -328,18 +331,6 @@ export const getTransactionHandler = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Transaction not found" });
 
     let jobProgress = null;
-    if (transaction.status === TransactionStatus.Pending) jobProgress = await getJobProgress(id);
-
-    const timeoutMinutes = Number(process.env.TRANSACTION_TIMEOUT_MINUTES || 30);
-    if (transaction.status === TransactionStatus.Pending) {
-      const createdAt = new Date(transaction.createdAt).getTime();
-      const now = Date.now();
-      if ((now - createdAt) / (1000 * 60) > timeoutMinutes) {
-        await transactionModel.updateStatus(id, TransactionStatus.Failed);
-        transaction.status = TransactionStatus.Failed;
-        (transaction as any).reason = "Transaction timeout";
-      }
-    }
     if (transaction.status === TransactionStatus.Pending) {
       jobProgress = await getJobProgress(id);
     }
@@ -364,6 +355,10 @@ export const getTransactionHandler = async (req: Request, res: Response) => {
       }
     }
 
+    if (transaction.status === TransactionStatus.Pending) {
+      jobProgress = await getJobProgress(id);
+    }
+
     const response: TransactionDetailResponse = { ...transaction, jobProgress };
     res.json(response);
   } catch (err) {
@@ -380,20 +375,12 @@ export const cancelTransactionHandler = async (req: Request, res: Response) => {
     if (!transaction)
       return res.status(404).json({ error: "Transaction not found" });
 
-    if (transaction.status !== TransactionStatus.Pending)
-      return res
-        .status(400)
-        .json({
-          error: `Cannot cancel transaction with status '${transaction.status}'`,
-        });
-
     if (transaction.status !== TransactionStatus.Pending) {
       return res.status(400).json({
         error: `Cannot cancel transaction with status '${transaction.status}'`,
       });
     }
 
-    const updatedTransaction = await transactionModel.updateStatus(id, TransactionStatus.Cancelled);
     await transactionModel.updateStatus(id, TransactionStatus.Cancelled);
     const updatedTransaction = await transactionModel.findById(id);
     if (!updatedTransaction)
@@ -416,7 +403,7 @@ export const cancelTransactionHandler = async (req: Request, res: Response) => {
       }
     }
 
-    res.json({
+    const body: CancelTransactionResponse = {
       message: "Transaction cancelled successfully",
       transaction: updatedTransaction,
     };

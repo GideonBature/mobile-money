@@ -32,7 +32,38 @@ export interface Transaction {
   tags: string[];
   notes?: string;
   admin_notes?: string;
+  retryCount?: number;
   createdAt: Date;
+}
+
+/** Map a pg row (snake_case) to the Transaction interface */
+export function mapTransactionRow(
+  row: Record<string, unknown> | undefined | null,
+): Transaction | null {
+  if (!row) return null;
+  const created = row.created_at ?? row.createdAt;
+  return {
+    id: String(row.id),
+    referenceNumber: String(row.reference_number ?? row.referenceNumber ?? ""),
+    type: (row.type as Transaction["type"]) || "deposit",
+    amount: String(row.amount ?? ""),
+    phoneNumber: String(row.phone_number ?? row.phoneNumber ?? ""),
+    provider: String(row.provider ?? ""),
+    stellarAddress: String(row.stellar_address ?? row.stellarAddress ?? ""),
+    status: row.status as TransactionStatus,
+    tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+    notes:
+      row.notes != null && row.notes !== ""
+        ? String(row.notes)
+        : undefined,
+    admin_notes:
+      row.admin_notes != null && row.admin_notes !== ""
+        ? String(row.admin_notes)
+        : undefined,
+    retryCount: Number(row.retry_count ?? 0),
+    createdAt:
+      created instanceof Date ? created : new Date(String(created ?? "")),
+  };
 }
 
 export class TransactionModel {
@@ -59,7 +90,7 @@ export class TransactionModel {
         data.notes ?? null,
       ],
     );
-    return result.rows[0];
+    return mapTransactionRow(result.rows[0])!;
   }
 
   async findById(id: string): Promise<Transaction | null> {
@@ -67,7 +98,7 @@ export class TransactionModel {
       "SELECT * FROM transactions WHERE id = $1",
       [id],
     );
-    return result.rows[0] || null;
+    return mapTransactionRow(result.rows[0]);
   }
 
   /** Paginated list, newest first. `limit` is capped at 100. */
@@ -78,7 +109,9 @@ export class TransactionModel {
       "SELECT * FROM transactions ORDER BY created_at DESC LIMIT $1 OFFSET $2",
       [capped, off],
     );
-    return result.rows;
+    return result.rows
+      .map((r) => mapTransactionRow(r))
+      .filter((t): t is Transaction => t !== null);
   }
 
   async updateStatus(id: string, status: TransactionStatus): Promise<void> {
@@ -95,7 +128,7 @@ export class TransactionModel {
       "SELECT * FROM transactions WHERE reference_number = $1",
       [referenceNumber],
     );
-    return result.rows[0] || null;
+    return mapTransactionRow(result.rows[0]);
   }
 
   /**
@@ -109,7 +142,9 @@ export class TransactionModel {
       "SELECT * FROM transactions WHERE tags @> $1",
       [tags],
     );
-    return result.rows;
+    return result.rows
+      .map((r) => mapTransactionRow(r))
+      .filter((t): t is Transaction => t !== null);
   }
 
   /**
@@ -128,7 +163,7 @@ export class TransactionModel {
        RETURNING *`,
       [tags, id],
     );
-    return result.rows[0] || null;
+    return mapTransactionRow(result.rows[0]);
   }
 
   /**
@@ -142,7 +177,7 @@ export class TransactionModel {
        RETURNING *`,
       [tags, id],
     );
-    return result.rows[0] || null;
+    return mapTransactionRow(result.rows[0]);
   }
 
   /**
@@ -159,12 +194,27 @@ export class TransactionModel {
     const result = await pool.query(
       `SELECT * FROM transactions 
        WHERE user_id = $1 
-       AND status = $3 
-       AND created_at >= $2
+       AND status = $2 
+       AND created_at >= $3
        ORDER BY created_at DESC`,
-      [userId, since],
+      [userId, TransactionStatus.Completed, since],
     );
-    return result.rows;
+    return result.rows
+      .map((r) => mapTransactionRow(r))
+      .filter((t): t is Transaction => t !== null);
+  }
+
+  /** Increments retry_count after a failed transient attempt (before the next try). */
+  async incrementRetryCount(id: string): Promise<number> {
+    const r = await pool.query(
+      `UPDATE transactions
+       SET retry_count = retry_count + 1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING retry_count`,
+      [id],
+    );
+    return Number(r.rows[0]?.retry_count ?? 0);
   }
 
   async updateNotes(id: string, notes: string): Promise<Transaction | null> {
@@ -174,7 +224,7 @@ export class TransactionModel {
       "UPDATE transactions SET notes = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *",
       [notes, id],
     );
-    return result.rows[0] || null;
+    return mapTransactionRow(result.rows[0]);
   }
 
   async updateAdminNotes(
@@ -187,7 +237,7 @@ export class TransactionModel {
       "UPDATE transactions SET admin_notes = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *",
       [adminNotes, id],
     );
-    return result.rows[0] || null;
+    return mapTransactionRow(result.rows[0]);
   }
 
   async searchByNotes(query: string): Promise<Transaction[]> {
@@ -197,6 +247,8 @@ export class TransactionModel {
        ORDER BY created_at DESC`,
       [query],
     );
-    return result.rows;
+    return result.rows
+      .map((r) => mapTransactionRow(r))
+      .filter((t): t is Transaction => t !== null);
   }
 }

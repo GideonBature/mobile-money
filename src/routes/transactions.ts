@@ -5,27 +5,30 @@ import {
   getTransactionHandler,
   cancelTransactionHandler,
   validateTransaction,
-  getTransactionHistoryHandler, // Added for pagination/filtering
+  getTransactionHistoryHandler,
   updateNotesHandler,
   searchTransactionsHandler,
-  validateTransaction,
 } from "../controllers/transactionController";
 import { TimeoutPresets, haltOnTimedout } from "../middleware/timeout";
 
-import { validateTransaction } from "../controllers/transactionController";
-
 export const transactionRoutes = Router();
 
-// --- Transaction History (New) ---
-// GET /api/transactions
+// --- Transaction History ---
 transactionRoutes.get(
   "/",
   TimeoutPresets.quick,
   haltOnTimedout,
-  getTransactionHistoryHandler
+  getTransactionHistoryHandler,
 );
 
-// Deposit route
+// Static paths before /:id
+transactionRoutes.get(
+  "/search",
+  TimeoutPresets.quick,
+  haltOnTimedout,
+  searchTransactionsHandler,
+);
+
 transactionRoutes.post(
   "/deposit",
   TimeoutPresets.long,
@@ -34,7 +37,6 @@ transactionRoutes.post(
   depositHandler,
 );
 
-// Withdraw route
 transactionRoutes.post(
   "/withdraw",
   TimeoutPresets.long,
@@ -43,9 +45,6 @@ transactionRoutes.post(
   withdrawHandler,
 );
 
-// Get single transaction
-transactionRoutes.get("/:id", TimeoutPresets.quick, haltOnTimedout, getTransactionHandler);
-// Quick read operation
 transactionRoutes.get(
   "/:id",
   TimeoutPresets.quick,
@@ -53,7 +52,6 @@ transactionRoutes.get(
   getTransactionHandler,
 );
 
-// Notes and search
 transactionRoutes.patch(
   "/:id/notes",
   TimeoutPresets.quick,
@@ -61,9 +59,9 @@ transactionRoutes.patch(
   updateNotesHandler,
 );
 
-transactionRoutes.get(
-  "/search",
+transactionRoutes.post(
+  "/:id/cancel",
   TimeoutPresets.quick,
   haltOnTimedout,
-  searchTransactionsHandler,
+  cancelTransactionHandler,
 );

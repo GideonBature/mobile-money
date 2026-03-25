@@ -193,9 +193,13 @@ git commit -m "Your message" --no-verify
 
 ### Transactions
 
+- `GET /api/transactions` - Transaction history (date range, pagination)
+- `GET /api/transactions/search` - Search (see handler; may return 501 if not implemented)
 - `POST /api/transactions/deposit` - Deposit from mobile money to Stellar
 - `POST /api/transactions/withdraw` - Withdraw from Stellar to mobile money
 - `GET /api/transactions/:id` - Get transaction status
+- `POST /api/transactions/:id/cancel` - Cancel a pending transaction
+- Disputes: `POST /api/transactions/:id/dispute` and `/api/disputes/*` (status workflow, notes, report)
 
 ### Statistics & Metrics
 
@@ -245,6 +249,22 @@ Allows users to view their transaction history with built-in pagination and date
 **Validation Rules:**
 - Returns `400 Bad Request` if the date format is not ISO 8601.
 - Returns `400 Bad Request` if `startDate` is a later date than `endDate`.
+
+## SMS notifications (Twilio)
+
+The queue worker can text users on **transaction completed** and **transaction failed**. Set `SMS_PROVIDER=twilio` and provide `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`. **No SMS is sent** when `NODE_ENV=test` or `SMS_PROVIDER=none`. Per-destination rate limiting uses `SMS_MAX_PER_PHONE_PER_HOUR` and `SMS_RATE_LIMIT_WINDOW_MS`. Numbers are normalized to E.164; use `SMS_DEFAULT_REGION` (ISO country code, default `CM`) when the stored number has no `+` prefix.
+
+## Transaction retries
+
+Transient failures (timeouts, connection issues, throttling / 5xx-style errors) are retried inside the worker with exponential backoff: wait `RETRY_DELAY_MS * 2^(attempt-1)` between attempts. Configure `MAX_RETRY_ATTEMPTS` (default `3`) and `RETRY_DELAY_MS` (default `1000`). The `transactions.retry_count` column is incremented before each retry; run `npm run migrate:up` to apply migration `003_add_retry_count`.
+
+## Stellar custom assets
+
+Leave `STELLAR_ASSET_CODE` empty for native XLM. To pay a custom or anchored asset (for example USDC), set `STELLAR_ASSET_CODE` and `STELLAR_ASSET_ISSUER`. The destination account must already hold a trustline for that asset, or the payment fails with an explicit error. Balance checks use the same configured asset. See `src/services/stellar/assetService.ts`.
+
+## Disputes
+
+Disputes are limited to transactions in **completed** or **failed** status. Workflow, notes, assignment, and reporting are exposed via the dispute routes in `src/routes/disputes.ts` and GraphQL where applicable.
 
 ## Contributing
 

@@ -65,7 +65,8 @@ function toGraphQLError(err: unknown, fallback: string): GraphQLError {
   if (
     lower.includes("cannot transition") ||
     lower.includes("resolution text") ||
-    lower.includes("cannot assign")
+    lower.includes("cannot assign") ||
+    lower.includes("only allowed for completed")
   ) {
     return new GraphQLError(message, { extensions: { code: "BAD_USER_INPUT" } });
   }

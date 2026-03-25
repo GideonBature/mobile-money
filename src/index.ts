@@ -72,11 +72,6 @@ app.use(limiter);
 app.use(responseTime);
 
 // Health & readiness
-app.get("/health", (req, res) =>
-  res.json({ status: "ok", timestamp: new Date().toISOString() }),
-);
-
-// Basic health check
 app.get("/health", (req, res) => {
   const body: HealthCheckResponse = {
     status: "ok",
@@ -159,18 +154,17 @@ app.use(
 app.use(timeoutErrorHandler);
 app.use(errorHandler);
 
-// Redis init
-connectRedis()
-  .then(() => {
-    // Only log if not in test mode to keep test output clean
-    if (process.env.NODE_ENV !== 'test') {
+// Redis init (skip during Jest — avoids open handles and ECONNREFUSED noise)
+if (process.env.NODE_ENV !== "test") {
+  connectRedis()
+    .then(() => {
       console.log("Redis initialized");
-    }
-  })
-  .catch((err) => {
-    console.error("Redis failed", err);
-    console.warn("Distributed locks not available");
-  });
+    })
+    .catch((err) => {
+      console.error("Redis failed", err);
+      console.warn("Distributed locks not available");
+    });
+}
 
 // Queue dashboard
 const queueRouter = createQueueDashboard();
@@ -178,17 +172,13 @@ app.use("/admin/queues", queueRouter);
 
 // --- START SERVER LOGIC ---
 // We check if we are in a test environment to prevent port collisions
-if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(
+      `Rate limit: ${RATE_LIMIT_MAX_REQUESTS} requests per ${RATE_LIMIT_WINDOW_MS / 1000}s`,
+    );
+  });
 }
-
-// Export the app instance for Supertest integration tests
-export default app;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(
-    `Rate limit: ${RATE_LIMIT_MAX_REQUESTS} requests per ${RATE_LIMIT_WINDOW_MS / 1000}s`,
-  );
-});
 
 export default app;
