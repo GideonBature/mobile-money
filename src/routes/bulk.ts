@@ -154,64 +154,70 @@ async function processJob(jobId: string, rows: CsvRow[]): Promise<void> {
 
   job.status = "processing";
 
-  const transactionModel = new TransactionModel();
-  const mobileMoneyService = new MobileMoneyService();
-
-  let stellarService: StellarService | null = null;
   try {
-    stellarService = new StellarService();
-  } catch {
-    console.warn(
-      "[BulkImport] StellarService unavailable — payments will be skipped",
-    );
-  }
+    const transactionModel = new TransactionModel();
+    const mobileMoneyService = new MobileMoneyService();
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
+    let stellarService: StellarService | null = null;
     try {
-      const transaction = await transactionModel.create({
-        type: "deposit",
-        amount: row.amount,
-        phoneNumber: row.phoneNumber,
-        provider: row.provider.toUpperCase(),
-        stellarAddress: row.stellarAddress,
-        status: TransactionStatus.Pending,
-        tags: [],
-      });
-
-      const mobileResult = await mobileMoneyService.initiatePayment(
-        row.provider,
-        row.phoneNumber,
-        row.amount,
+      stellarService = new StellarService();
+    } catch {
+      console.warn(
+        "[BulkImport] StellarService unavailable — deposits will be skipped",
       );
-
-      if (mobileResult.success && stellarService) {
-        await stellarService.sendPayment(row.stellarAddress, row.amount);
-        await transactionModel.updateStatus(
-          transaction.id,
-          TransactionStatus.Completed,
-        );
-      } else {
-        await transactionModel.updateStatus(
-          transaction.id,
-          TransactionStatus.Failed,
-        );
-      }
-
-      job.succeeded++;
-    } catch (error) {
-      job.failed++;
-      job.errors.push({
-        row: i + 2, // +1 for 0-index, +1 for header row
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    } finally {
-      job.processed++;
     }
-  }
 
-  job.status = "completed";
-  job.completedAt = new Date();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        const transaction = await transactionModel.create({
+          type: "deposit",
+          amount: row.amount,
+          phoneNumber: row.phoneNumber,
+          provider: row.provider.toUpperCase(),
+          stellarAddress: row.stellarAddress,
+          status: TransactionStatus.Pending,
+          tags: [],
+        });
+
+        // initiatePayment throws on failure — only attempt Stellar if it succeeds
+        await mobileMoneyService.initiatePayment(
+          row.provider,
+          row.phoneNumber,
+          row.amount,
+        );
+
+        if (stellarService) {
+          await stellarService.sendPayment(row.stellarAddress, row.amount);
+          await transactionModel.updateStatus(
+            transaction.id,
+            TransactionStatus.Completed,
+          );
+        } else {
+          await transactionModel.updateStatus(
+            transaction.id,
+            TransactionStatus.Failed,
+          );
+          throw new Error("StellarService unavailable — deposit not completed");
+        }
+
+        job.succeeded++;
+      } catch (error) {
+        job.failed++;
+        job.errors.push({
+          row: i + 2, // +1 for 0-index, +1 for header row
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      } finally {
+        job.processed++;
+      }
+    }
+  } catch (error) {
+    console.error("[BulkImport] Fatal error in processJob:", error);
+  } finally {
+    job.status = "completed";
+    job.completedAt = new Date();
+  }
 }
 
 // ---------------------------------------------------------------------------
