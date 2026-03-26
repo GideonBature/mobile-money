@@ -200,6 +200,18 @@ git commit -m "Your message" --no-verify
 - `POST /api/transactions/withdraw` - Withdraw from Stellar to mobile money
 - `GET /api/transactions/:id` - Get transaction status
 
+#### Transaction Idempotency
+
+Send an `Idempotency-Key` header on `POST /api/transactions/deposit` and
+`POST /api/transactions/withdraw` when the client may retry the same request.
+
+- duplicate requests with the same active key return the existing transaction
+  with HTTP `200`
+- keys remain active for `24` hours by default
+- expired keys are cleared during cleanup so they can be reused safely later
+- race conditions are still protected by the database unique index on
+  `transactions.idempotency_key`
+
 ### Statistics & Metrics
 
 - `GET /api/stats` - Get system-wide statistics (Total transactions, success rate, total volume, active users, and volume by provider).

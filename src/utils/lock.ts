@@ -163,6 +163,7 @@ export const lockManager = new LockManager();
 export const LockKeys = {
   transaction: (id: string) => `transaction:${id}`,
   phoneNumber: (phone: string) => `phone:${phone}`,
+  idempotency: (key: string) => `idempotency:${key}`,
   referenceNumber: (date: string) => `reference:${date}`,
   stellarAccount: (address: string) => `stellar:${address}`,
   provider: (provider: string, phone: string) =>

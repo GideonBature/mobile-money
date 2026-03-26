@@ -1,6 +1,4 @@
-import { Request, Response, NextFunction } from "express";
-import { z } from "zod";
-import { StellarService } from "../services/stellar/stellarService";
+import { Request, Response } from "express";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { TransactionModel, TransactionStatus } from "../models/transaction";
 import { pool } from "../config/database";
@@ -8,13 +6,12 @@ import { lockManager, LockKeys } from "../utils/lock";
 import { TransactionLimitService } from "../services/transactionLimit/transactionLimitService";
 import { KYCService } from "../services/kyc/kycService";
 import { addTransactionJob, getJobProgress } from "../queue";
-import {
-  TransactionResponse,
-  TransactionDetailResponse,
-  CancelTransactionResponse,
-  LimitExceededErrorResponse,
-} from "../types/api";
 
+const IDEMPOTENCY_TTL_HOURS = Number(
+  process.env.IDEMPOTENCY_KEY_TTL_HOURS || 24,
+);
+
+// Initialized for upcoming transaction execution work.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const stellarService = new StellarService();
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -119,77 +116,68 @@ export const getTransactionHistoryHandler = async (req: Request, res: Response) 
       .status(500)
       .json({ error: "Failed to fetch transaction history from database" });
   }
-};
-// ------------------ Existing Handlers ------------------
 
-
-
-
-
-
-/*
-//Mock data for test//
-
-
-export const getTransactionHistoryHandler = async (req: Request, res: Response) => {
-  try {
-    const { startDate, endDate, page = "1", limit = "10" } = req.query;
-
-    // 1. ISO 8601 Validation
-    const isValidISO = (dateStr: any) => {
-      if (!dateStr) return true;
-      const d = new Date(dateStr as string);
-      return !isNaN(d.getTime()) && (dateStr as string).includes('-');
-    };
-
-    if (!isValidISO(startDate) || !isValidISO(endDate)) {
-      return res.status(400).json({ 
-        error: "Invalid date format. Please use ISO 8601 (YYYY-MM-DD)" 
-      });
-    }
-
-    // 2. Logic Validation (THE MISSING PIECE)
-    if (startDate && endDate && new Date(startDate as string) > new Date(endDate as string)) {
-      return res.status(400).json({ 
-        error: "startDate cannot be greater than endDate" 
-      });
-    }
-
-    // 3. MOCK DATA (Only reached if validation passes)
-    const mockTransactions = [
-      { id: 1, amount: 100, type: 'deposit', created_at: new Date().toISOString() },
-      { id: 2, amount: 50, type: 'withdraw', created_at: new Date().toISOString() }
-    ];
-
-    res.json({
-      success: true,
-      pagination: { 
-        page: parseInt(page as string) || 1, 
-        limit: parseInt(limit as string) || 10, 
-        count: mockTransactions.length 
-      },
-      data: mockTransactions
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
+  if (key.length > 255) {
+    throw new Error("Idempotency-Key must be 255 characters or fewer");
   }
-};
 
+  return key;
+}
 
+function buildIdempotencyExpiry(): Date {
+  const now = Date.now();
+  return new Date(now + IDEMPOTENCY_TTL_HOURS * 60 * 60 * 1000);
+}
 
-*/
-export const depositHandler = async (req: Request, res: Response) => {
+function buildTransactionResponse(
+  transaction: Transaction,
+): CreateTransactionResponse {
+  return {
+    transactionId: transaction.id,
+    referenceNumber: transaction.referenceNumber,
+    status: transaction.status,
+    jobId: transaction.id,
+  };
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return "code" in error && error.code === "23505";
+}
+
+async function findExistingIdempotentTransaction(
+  idempotencyKey: string,
+): Promise<Transaction | null> {
+  await transactionModel.releaseExpiredIdempotencyKey(idempotencyKey);
+  return transactionModel.findActiveByIdempotencyKey(idempotencyKey);
+}
+
+async function processTransactionRequest(
+  req: Request,
+  res: Response,
+  type: TransactionRequestType,
+): Promise<Response> {
   try {
-    const { amount, phoneNumber, provider, stellarAddress, userId } = req.body;
+    const { amount, phoneNumber, provider, stellarAddress, userId, notes } =
+      req.body;
+
+    const requestAmount = getRequestAmount(amount);
+    if (!Number.isFinite(requestAmount) || requestAmount <= 0) {
+      return res.status(400).json({ error: "Amount must be a positive number" });
+    }
+
+    const idempotencyKey = getIdempotencyKey(req);
 
     const limitCheck = await transactionLimitService.checkTransactionLimit(
       userId,
-      parseFloat(amount),
+      requestAmount,
     );
 
     if (!limitCheck.allowed) {
-      const body: LimitExceededErrorResponse = {
+      return res.status(400).json({
         error: "Transaction limit exceeded",
         details: {
           kycLevel: limitCheck.kycLevel,
@@ -199,134 +187,124 @@ export const depositHandler = async (req: Request, res: Response) => {
           message: limitCheck.message,
           upgradeAvailable: limitCheck.upgradeAvailable,
         },
-      };
-      return res.status(400).json(body);
+      });
     }
 
-    const result = await lockManager.withLock(
-      LockKeys.phoneNumber(phoneNumber),
-      async (): Promise<TransactionResponse> => {
-        const transaction = await transactionModel.create({
-          type: "deposit",
-          amount,
-          phoneNumber,
-          provider,
-          stellarAddress,
-          status: TransactionStatus.Pending,
-          tags: [],
-        });
+    const createOrReuse = async (): Promise<CreateTransactionResponse> => {
+      if (idempotencyKey) {
+        const existingTransaction =
+          await findExistingIdempotentTransaction(idempotencyKey);
+        if (existingTransaction) {
+          return buildTransactionResponse(existingTransaction);
+        }
+      }
 
-        const job = await addTransactionJob({
-          transactionId: transaction.id,
-          type: "deposit",
-          amount,
-          phoneNumber,
-          provider,
-          stellarAddress,
-        });
+      try {
+        return await lockManager.withLock(
+          LockKeys.phoneNumber(phoneNumber),
+          async () => {
+            if (idempotencyKey) {
+              const existingTransaction =
+                await findExistingIdempotentTransaction(idempotencyKey);
+              if (existingTransaction) {
+                return buildTransactionResponse(existingTransaction);
+              }
+            }
 
-        return {
-          transactionId: transaction.id,
-          referenceNumber: transaction.referenceNumber,
-          status: TransactionStatus.Pending,
-          jobId: job.id,
-        };
-      },
-      15000,
-    );
+            const transaction = await transactionModel.create({
+              type,
+              amount: String(amount),
+              phoneNumber,
+              provider,
+              stellarAddress,
+              status: TransactionStatus.Pending,
+              tags: [],
+              notes,
+              userId,
+              idempotencyKey,
+              idempotencyExpiresAt: idempotencyKey
+                ? buildIdempotencyExpiry()
+                : null,
+            });
 
-    res.json(result);
+            const job = await addTransactionJob(
+              {
+                transactionId: transaction.id,
+                type,
+                amount: String(amount),
+                phoneNumber,
+                provider,
+                stellarAddress,
+              },
+              {
+                jobId: transaction.id,
+              },
+            );
+
+            return {
+              ...buildTransactionResponse(transaction),
+              jobId: String(job.id ?? transaction.id),
+            };
+          },
+          15000,
+        );
+      } catch (error) {
+        if (idempotencyKey && isUniqueViolation(error)) {
+          const existingTransaction =
+            await findExistingIdempotentTransaction(idempotencyKey);
+
+          if (existingTransaction) {
+            return buildTransactionResponse(existingTransaction);
+          }
+        }
+
+        throw error;
+      }
+    };
+
+    const result = idempotencyKey
+      ? await lockManager.withLock(
+          LockKeys.idempotency(idempotencyKey),
+          createOrReuse,
+          15000,
+        )
+      : await createOrReuse();
+
+    return res.status(200).json(result);
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message.includes("Unable to acquire lock")
+      error.message.includes("Idempotency-Key must be")
     ) {
-      return res
-        .status(409)
-        .json({
-          error: "Transaction already in progress for this phone number",
-        });
+      return res.status(400).json({ error: error.message });
     }
-    res.status(500).json({ error: "Transaction failed" });
+
+    if (error instanceof Error && error.message.includes("Unable to acquire lock")) {
+      return res.status(409).json({
+        error: "Transaction already in progress for this resource",
+      });
+    }
+
+    return res.status(500).json({ error: "Transaction failed" });
   }
+}
+
+export const depositHandler = async (req: Request, res: Response) => {
+  return processTransactionRequest(req, res, "deposit");
 };
 
 export const withdrawHandler = async (req: Request, res: Response) => {
-  try {
-    const { amount, phoneNumber, provider, stellarAddress, userId } = req.body;
-
-    const limitCheck = await transactionLimitService.checkTransactionLimit(
-      userId,
-      parseFloat(amount),
-    );
-
-    if (!limitCheck.allowed) {
-      const body: LimitExceededErrorResponse = {
-        error: "Transaction limit exceeded",
-        details: {
-          kycLevel: limitCheck.kycLevel,
-          dailyLimit: limitCheck.dailyLimit,
-          currentDailyTotal: limitCheck.currentDailyTotal,
-          remainingLimit: limitCheck.remainingLimit,
-          message: limitCheck.message,
-          upgradeAvailable: limitCheck.upgradeAvailable,
-        },
-      };
-      return res.status(400).json(body);
-    }
-
-    const result = await lockManager.withLock(
-      LockKeys.phoneNumber(phoneNumber),
-      async (): Promise<TransactionResponse> => {
-        const transaction = await transactionModel.create({
-          type: "withdraw",
-          amount,
-          phoneNumber,
-          provider,
-          stellarAddress,
-          status: TransactionStatus.Pending,
-          tags: [],
-        });
-
-        const job = await addTransactionJob({
-          transactionId: transaction.id,
-          type: "withdraw",
-          amount,
-          phoneNumber,
-          provider,
-          stellarAddress,
-        });
-
-        return {
-          transactionId: transaction.id,
-          referenceNumber: transaction.referenceNumber,
-          status: TransactionStatus.Pending,
-          jobId: job.id,
-        };
-      },
-      15000,
-    );
-
-    res.json(result);
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes("Unable to acquire lock")
-    ) {
-      return res.status(409).json({
-        error: "Transaction already in progress for this phone number",
-      });
-    }
-    res.status(500).json({ error: "Transaction failed" });
-  }
+  return processTransactionRequest(req, res, "withdraw");
 };
 
 export const getTransactionHandler = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const transaction = await transactionModel.findById(id);
-    if (!transaction)
+
+    if (!transaction) {
       return res.status(404).json({ error: "Transaction not found" });
+    }
 
     let jobProgress = null;
     if (transaction.status === TransactionStatus.Pending) {
@@ -339,20 +317,24 @@ export const getTransactionHandler = async (req: Request, res: Response) => {
 
     if (transaction.status === TransactionStatus.Pending) {
       const createdAt = new Date(transaction.createdAt).getTime();
-      const diffMinutes = (Date.now() - createdAt) / (1000 * 60);
+      const now = Date.now();
+      const diffMinutes = (now - createdAt) / (1000 * 60);
 
       if (diffMinutes > timeoutMinutes) {
         await transactionModel.updateStatus(id, TransactionStatus.Failed);
         transaction.status = TransactionStatus.Failed;
-        (transaction as { reason?: string }).reason = "Transaction timeout";
+        return res.json({
+          ...transaction,
+          reason: "Transaction timeout",
+          jobProgress,
+        });
       }
     }
 
-    const response: TransactionDetailResponse = { ...transaction, jobProgress };
-    res.json(response);
+    return res.json({ ...transaction, jobProgress });
   } catch (err) {
     console.error("Failed to fetch transaction:", err);
-    res.status(500).json({ error: "Failed to fetch transaction" });
+    return res.status(500).json({ error: "Failed to fetch transaction" });
   }
 };
 
@@ -361,7 +343,7 @@ export const cancelTransactionHandler = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const transaction = await transactionModel.findById(id);
-    if (!transaction)
+    if (!transaction) {
       return res.status(404).json({ error: "Transaction not found" });
 
     if (transaction.status !== TransactionStatus.Pending) {
@@ -372,10 +354,12 @@ export const cancelTransactionHandler = async (req: Request, res: Response) => {
 
     await transactionModel.updateStatus(id, TransactionStatus.Cancelled);
     const updatedTransaction = await transactionModel.findById(id);
-    if (!updatedTransaction)
+
+    if (!updatedTransaction) {
       return res
         .status(500)
         .json({ error: "Failed to load transaction after cancel" });
+    }
 
     if (process.env.WEBHOOK_URL) {
       try {
@@ -398,16 +382,67 @@ export const cancelTransactionHandler = async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("Failed to cancel transaction:", err);
-    res.status(500).json({ error: "Failed to cancel transaction" });
+    return res.status(500).json({
+      error: "Failed to cancel transaction",
+    });
   }
 };
 
 export const updateNotesHandler = async (req: Request, res: Response) => {
-  res.status(501).json({ error: "Not implemented" });
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+
+    if (typeof notes !== "string") {
+      return res.status(400).json({ error: "Notes must be a string" });
+    }
+
+    const transaction = await transactionModel.updateNotes(id, notes);
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    return res.json(transaction);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to update notes";
+
+    return res
+      .status(
+        err instanceof Error && err.message.includes("characters") ? 400 : 500,
+      )
+      .json({ error: message });
+  }
 };
 
-export const updateAdminNotesHandler = async (req: Request, res: Response) => {
-  res.status(501).json({ error: "Not implemented" });
+export const updateAdminNotesHandler = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { id } = req.params;
+    const { admin_notes: adminNotes } = req.body;
+
+    if (typeof adminNotes !== "string") {
+      return res.status(400).json({ error: "Admin notes must be a string" });
+    }
+
+    const transaction = await transactionModel.updateAdminNotes(id, adminNotes);
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    return res.json(transaction);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to update admin notes";
+
+    return res
+      .status(
+        err instanceof Error && err.message.includes("characters") ? 400 : 500,
+      )
+      .json({ error: message });
+  }
 };
 
 export const searchTransactionsHandler = async (

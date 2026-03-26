@@ -1,4 +1,7 @@
 import { pool } from "../config/database";
+import { TransactionModel } from "../models/transaction";
+
+const transactionModel = new TransactionModel();
 
 /**
  * Cleanup Job
@@ -8,6 +11,7 @@ import { pool } from "../config/database";
  */
 export async function runCleanupJob(): Promise<void> {
   const retentionDays = parseInt(process.env.LOG_RETENTION_DAYS || "90", 10);
+  const expiredKeyCount = await transactionModel.releaseAllExpiredIdempotencyKeys();
 
   const result = await pool.query(
     `DELETE FROM transactions
@@ -18,4 +22,5 @@ export async function runCleanupJob(): Promise<void> {
   console.log(
     `[cleanup] Deleted ${result.rowCount} old transaction(s) older than ${retentionDays} days`,
   );
+  console.log(`[cleanup] Released ${expiredKeyCount} expired idempotency key(s)`);
 }

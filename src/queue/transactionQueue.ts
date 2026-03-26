@@ -29,9 +29,11 @@ export async function addTransactionJob(
     priority?: number;
     delay?: number;
     repeat?: { every: number };
+    jobId?: string;
   },
 ) {
   return await transactionQueue.add("process-transaction", data, {
+    jobId: options?.jobId ?? data.transactionId,
     priority: options?.priority,
     delay: options?.delay,
     repeat: options?.repeat,

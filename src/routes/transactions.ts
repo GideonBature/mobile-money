@@ -8,6 +8,7 @@ import {
   updateNotesHandler,
   searchTransactionsHandler,
 } from "../controllers/transactionController";
+import { validateTransaction } from "../middleware/validateTransaction";
 import { TimeoutPresets, haltOnTimedout } from "../middleware/timeout";
 
 export const transactionRoutes = Router();
