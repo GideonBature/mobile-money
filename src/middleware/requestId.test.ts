@@ -1,10 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { requestId } from "./requestId";
 
-jest.mock("uuid", () => ({
-  v4: jest.fn(() => "test-uuid-1234-5678-9012-345678901234"),
-}));
-
 describe("requestId middleware", () => {
   let mockReq: Request & { id?: string };
   let mockRes: Partial<Response>;
@@ -24,7 +20,9 @@ describe("requestId middleware", () => {
     requestId(mockReq, mockRes as Response, mockNext);
 
     expect(mockReq.id).toBeDefined();
-    expect(mockReq.id).toBe("test-uuid-1234-5678-9012-345678901234");
+    expect(mockReq.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(mockNext).toHaveBeenCalled();
   });
 

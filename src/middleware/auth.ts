@@ -1,10 +1,13 @@
 import { Request, Response, NextFunction } from "express";
-import { verifyToken, JWTPayload } from '../auth/jwt';
+import { verifyOAuthAccessToken } from "../auth/oauth";
+import { verifyToken, JWTPayload } from "../auth/jwt";
 
 export interface AuthRequest extends Request {
   user?: {
     id: string;
     role: string;
+    clientId?: string;
+    scopes?: string[];
   };
 }
 
@@ -29,20 +32,41 @@ export const requireAuth = (
   const apiKey = req.header("X-API-Key");
   const adminKey = process.env.ADMIN_API_KEY || "dev-admin-key";
 
-  if (!apiKey || apiKey !== adminKey) {
-    return res.status(401).json({
-      error: "Unauthorized",
-      message: "Valid administrative API key required in X-API-Key header",
-    });
+  if (apiKey && apiKey === adminKey) {
+    (req as AuthRequest).user = {
+      id: "admin-system",
+      role: "admin",
+    };
+
+    return next();
   }
 
-  // Mock user for admin actions
-  (req as AuthRequest).user = {
-    id: "admin-system",
-    role: "admin",
-  };
+  const authorization = req.header("Authorization");
+  const bearerToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
 
-  next();
+  if (bearerToken) {
+    try {
+      const claims = verifyOAuthAccessToken(bearerToken);
+      (req as AuthRequest).user = {
+        id: claims.sub,
+        role: claims.role,
+        clientId: claims.client_id,
+        scopes: claims.scope.split(/\s+/).filter(Boolean),
+      };
+
+      return next();
+    } catch {
+      return res.status(401).json({
+        error: "Unauthorized",
+        message: "Invalid or expired bearer token",
+      });
+    }
+  }
+
+  return res.status(401).json({
+    error: "Unauthorized",
+    message: "Valid administrative API key or OAuth bearer token required",
+  });
 };
 
 /**

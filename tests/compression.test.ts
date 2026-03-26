@@ -1,58 +1,72 @@
-import request from 'supertest';
-import app from '../src/index';
+import compression from "compression";
+import express from "express";
+import request from "supertest";
 
-describe('Compression Middleware', () => {
-  it('should compress large responses', async () => {
-    const largeData = 'x'.repeat(2000); // 2KB response
-    
-    const response = await request(app)
-      .get('/health')
-      .set('Accept-Encoding', 'gzip')
-      .expect(200);
-    
-    // Check if response is compressed
-    expect(response.headers['content-encoding']).toBe('gzip');
+function createCompressionApp(compressionEnabled = true) {
+  const app = express();
+
+  if (compressionEnabled) {
+    app.use(
+      compression({
+        threshold: 1024,
+        level: 6,
+        filter: (req, res) => {
+          if (req.headers["x-no-compression"]) {
+            return false;
+          }
+          return compression.filter(req, res);
+        },
+      }),
+    );
+  }
+
+  app.get("/large", (_req, res) => {
+    res.type("application/json");
+    res.json({ data: "x".repeat(4000) });
   });
 
-  it('should not compress small responses', async () => {
-    const response = await request(app)
-      .get('/health')
-      .set('Accept-Encoding', 'gzip')
-      .expect(200);
-    
-    // Small responses should not be compressed
-    expect(response.headers['content-encoding']).toBeUndefined();
+  app.get("/small", (_req, res) => {
+    res.json({ ok: true });
   });
 
-  it('should respect x-no-compression header', async () => {
-    const largeData = 'x'.repeat(2000);
-    
-    const response = await request(app)
-      .get('/health')
-      .set('Accept-Encoding', 'gzip')
-      .set('x-no-compression', 'true')
+  return app;
+}
+
+describe("Compression Middleware", () => {
+  it("should compress large responses", async () => {
+    const response = await request(createCompressionApp())
+      .get("/large")
+      .set("Accept-Encoding", "gzip")
       .expect(200);
-    
-    // Should not compress when x-no-compression header is present
-    expect(response.headers['content-encoding']).toBeUndefined();
+
+    expect(response.headers["content-encoding"]).toBe("gzip");
   });
 
-  it('should work with compression disabled', async () => {
-    // Temporarily disable compression
-    const originalEnabled = process.env.COMPRESSION_ENABLED;
-    process.env.COMPRESSION_ENABLED = 'false';
-    
-    try {
-      const response = await request(app)
-        .get('/health')
-        .set('Accept-Encoding', 'gzip')
-        .expect(200);
-      
-      // Should not compress when disabled
-      expect(response.headers['content-encoding']).toBeUndefined();
-    } finally {
-      // Restore original setting
-      process.env.COMPRESSION_ENABLED = originalEnabled;
-    }
+  it("should not compress small responses", async () => {
+    const response = await request(createCompressionApp())
+      .get("/small")
+      .set("Accept-Encoding", "gzip")
+      .expect(200);
+
+    expect(response.headers["content-encoding"]).toBeUndefined();
+  });
+
+  it("should respect x-no-compression header", async () => {
+    const response = await request(createCompressionApp())
+      .get("/large")
+      .set("Accept-Encoding", "gzip")
+      .set("x-no-compression", "true")
+      .expect(200);
+
+    expect(response.headers["content-encoding"]).toBeUndefined();
+  });
+
+  it("should work with compression disabled", async () => {
+    const response = await request(createCompressionApp(false))
+      .get("/large")
+      .set("Accept-Encoding", "gzip")
+      .expect(200);
+
+    expect(response.headers["content-encoding"]).toBeUndefined();
   });
 });

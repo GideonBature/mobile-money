@@ -10,12 +10,17 @@ import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { StellarService } from "../services/stellar/stellarService";
 import { EmailService } from "../services/email";
 import { UserModel } from "../models/users";
+import { withRetry } from "../services/retry";
+import { SmsService } from "../services/sms";
+import { notifyTransactionWebhook, WebhookService } from "../services/webhook";
 
 const transactionModel = new TransactionModel();
 const mobileMoneyService = new MobileMoneyService();
 const stellarService = new StellarService();
 const emailService = new EmailService();
 const userModel = new UserModel();
+const smsService = new SmsService();
+const webhookService = new WebhookService();
 
 const workerOptions = {
   ...queueOptions,
@@ -25,6 +30,52 @@ const workerOptions = {
     duration: 1000,
   },
 };
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+function getProviderFailureMessage(result: unknown): string {
+  if (!result || typeof result !== "object") {
+    return "Provider request failed";
+  }
+
+  const error = (result as { error?: unknown }).error;
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "Provider request failed";
+}
+
+async function sendTransactionEmail(transactionId: string): Promise<void> {
+  const transaction = await transactionModel.findById(transactionId);
+  if (!transaction?.userId) {
+    return;
+  }
+
+  const user = await userModel.findById(transaction.userId);
+  if (user?.email) {
+    await emailService.sendTransactionReceipt(user.email, transaction);
+  }
+}
+
+async function sendFailureEmail(
+  transactionId: string,
+  reason: string,
+): Promise<void> {
+  const transaction = await transactionModel.findById(transactionId);
+  if (!transaction?.userId) {
+    return;
+  }
+
+  const user = await userModel.findById(transaction.userId);
+  if (user?.email) {
+    await emailService.sendTransactionFailure(user.email, transaction, reason);
+  }
+}
 
 export const transactionWorker = new Worker<
   TransactionJobData,
@@ -96,7 +147,7 @@ export const transactionWorker = new Worker<
       if (type === "deposit") {
         await job.updateProgress(20);
 
-        await withRetry(async () => {
+        const mobileMoneyResult = await withRetry(async () => {
           const mobileMoneyResult = await mobileMoneyService.initiatePayment(
             provider,
             phoneNumber,
@@ -113,6 +164,9 @@ export const transactionWorker = new Worker<
 
         await job.updateProgress(50);
 
+        if (!mobileMoneyResult.success) {
+          throw new Error(getProviderFailureMessage(mobileMoneyResult));
+        }
         await job.updateProgress(70);
 
         await withRetry(
@@ -130,15 +184,7 @@ export const transactionWorker = new Worker<
           transactionModel,
           webhookService,
         });
-
-        // Fetch user and send email
-        const transaction = await transactionModel.findById(transactionId);
-        if (transaction?.userId) {
-          const user = await userModel.findById(transaction.userId);
-          if (user?.email) {
-            await emailService.sendTransactionReceipt(user.email, transaction);
-          }
-        }
+        await sendTransactionEmail(transactionId);
 
         await sendTxnSms("transaction_completed");
 
@@ -155,7 +201,7 @@ export const transactionWorker = new Worker<
       } else {
         await job.updateProgress(20);
 
-        await withRetry(async () => {
+        const mobileMoneyResult = await withRetry(async () => {
           const mobileMoneyResult = await mobileMoneyService.sendPayout(
             provider,
             phoneNumber,
@@ -171,6 +217,9 @@ export const transactionWorker = new Worker<
 
         await job.updateProgress(50);
 
+        if (!mobileMoneyResult.success) {
+          throw new Error(getProviderFailureMessage(mobileMoneyResult));
+        }
         await job.updateProgress(90);
 
         await transactionModel.updateStatus(
@@ -181,15 +230,7 @@ export const transactionWorker = new Worker<
           transactionModel,
           webhookService,
         });
-
-        // Fetch user and send email
-        const transaction = await transactionModel.findById(transactionId);
-        if (transaction?.userId) {
-          const user = await userModel.findById(transaction.userId);
-          if (user?.email) {
-            await emailService.sendTransactionReceipt(user.email, transaction);
-          }
-        }
+        await sendTransactionEmail(transactionId);
 
         await sendTxnSms("transaction_completed");
 
@@ -210,15 +251,11 @@ export const transactionWorker = new Worker<
         transactionId,
         TransactionStatus.Failed,
       );
-
-      // Fetch user and send email
-      const transaction = await transactionModel.findById(transactionId);
-      if (transaction?.userId) {
-        const user = await userModel.findById(transaction.userId);
-        if (user?.email) {
-          await emailService.sendTransactionFailure(user.email, transaction, error.message);
-        }
-      }
+      await notifyTransactionWebhook(transactionId, "transaction.failed", {
+        transactionModel,
+        webhookService,
+      });
+      await sendFailureEmail(transactionId, getErrorMessage(error));
       throw error;
     }
   },

@@ -6,14 +6,14 @@ import { Request, Response, NextFunction } from "express";
  */
 
 export interface VersionedRequest extends Request {
-  apiVersion: string;
+  apiVersion?: string;
   requestedVersion?: string;
 }
 
 // Current API version
 export const CURRENT_VERSION = "v1";
-export const SUPPORTED_VERSIONS = ["v1"];
-export const DEPRECATED_VERSIONS = [];
+export const SUPPORTED_VERSIONS: string[] = ["v1"];
+export const DEPRECATED_VERSIONS: string[] = [];
 
 /**
  * Middleware: Extract API version from URL or Accept header
@@ -22,7 +22,7 @@ export const DEPRECATED_VERSIONS = [];
 export const apiVersionMiddleware = (
   req: VersionedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     let version = CURRENT_VERSION;
@@ -35,7 +35,7 @@ export const apiVersionMiddleware = (
 
     // 2. Check Accept header (e.g., Accept: application/vnd.api+json;version=v1)
     const acceptHeader = req.get("accept");
-    if (acceptHeader && acceptHeader.includes("version=")) {
+    if (!pathMatch && acceptHeader && acceptHeader.includes("version=")) {
       const versionMatch = acceptHeader.match(/version=(v\d+)/);
       if (versionMatch) {
         version = versionMatch[1];
@@ -68,9 +68,9 @@ export const apiVersionMiddleware = (
 export const validateVersionMiddleware = (
   req: VersionedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
-  const { apiVersion } = req;
+  const apiVersion = req.apiVersion || CURRENT_VERSION;
 
   if (!SUPPORTED_VERSIONS.includes(apiVersion)) {
     return res.status(400).json({
@@ -85,11 +85,11 @@ export const validateVersionMiddleware = (
     res.setHeader("Deprecation", "true");
     res.setHeader(
       "Sunset",
-      new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toUTCString()
+      new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toUTCString(),
     );
     res.setHeader(
       "Link",
-      `<https://docs.example.com/api/${CURRENT_VERSION}>; rel="latest-version"`
+      `<https://docs.example.com/api/${CURRENT_VERSION}>; rel="latest-version"`,
     );
   }
 
@@ -106,13 +106,17 @@ export const getApiVersion = (req: VersionedRequest): string => {
 /**
  * Helper: Check if version supports a feature
  */
-export const supportsFeature = (
-  version: string,
-  feature: string
-): boolean => {
+export const supportsFeature = (version: string, feature: string): boolean => {
   const featureMatrix: Record<string, string[]> = {
     v1: ["basic-transactions", "disputes", "bulk-operations", "stats"],
-    v2: ["basic-transactions", "disputes", "bulk-operations", "stats", "webhooks", "advanced-filters"],
+    v2: [
+      "basic-transactions",
+      "disputes",
+      "bulk-operations",
+      "stats",
+      "webhooks",
+      "advanced-filters",
+    ],
   };
 
   return (featureMatrix[version] || []).includes(feature);
@@ -124,7 +128,7 @@ export const supportsFeature = (
 export const createVersionedResponse = (
   version: string,
   data: any,
-  meta?: any
+  meta?: any,
 ) => {
   return {
     version,

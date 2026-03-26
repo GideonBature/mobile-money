@@ -1,6 +1,5 @@
 import express from "express";
-import type { AddressInfo } from "net";
-import type { Server } from "http";
+import request from "supertest";
 
 const mockTransactionModel = {
   create: jest.fn(),
@@ -27,11 +26,7 @@ const mockTransactionLimitService = {
 const mockAddTransactionJob = jest.fn();
 const mockGetJobProgress = jest.fn();
 const mockWithLock = jest.fn(
-  async (
-    _resource: string,
-    fn: () => Promise<unknown>,
-    _ttl?: number,
-  ) => fn(),
+  async (_resource: string, fn: () => Promise<unknown>, _ttl?: number) => fn(),
 );
 
 jest.mock("../../src/services/stellar/stellarService", () => ({
@@ -46,11 +41,14 @@ jest.mock("../../src/services/kyc/kycService", () => ({
   KYCService: jest.fn().mockImplementation(() => ({})),
 }));
 
-jest.mock("../../src/services/transactionLimit/transactionLimitService", () => ({
-  TransactionLimitService: jest
-    .fn()
-    .mockImplementation(() => mockTransactionLimitService),
-}));
+jest.mock(
+  "../../src/services/transactionLimit/transactionLimitService",
+  () => ({
+    TransactionLimitService: jest
+      .fn()
+      .mockImplementation(() => mockTransactionLimitService),
+  }),
+);
 
 jest.mock("../../src/models/transaction", () => {
   const actual = jest.requireActual("../../src/models/transaction");
@@ -71,9 +69,17 @@ jest.mock("../../src/utils/lock", () => ({
   },
 }));
 
-jest.mock("../../src/queue", () => ({
+jest.mock("../../src/queue/transactionQueue", () => ({
   addTransactionJob: (...args: unknown[]) => mockAddTransactionJob(...args),
   getJobProgress: (...args: unknown[]) => mockGetJobProgress(...args),
+}));
+
+jest.mock("../../src/middleware/timeout", () => ({
+  TimeoutPresets: {
+    quick: (_req: unknown, _res: unknown, next: () => void) => next(),
+    long: (_req: unknown, _res: unknown, next: () => void) => next(),
+  },
+  haltOnTimedout: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 import { transactionRoutes } from "../../src/routes/transactions";
@@ -112,33 +118,20 @@ function buildTransaction(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createApp() {
+  const app = express();
+  app.use(express.json());
+  app.use("/api/transactions", transactionRoutes);
+  return app;
+}
+
 describe("transaction idempotency routes", () => {
-  let server: Server;
-  let baseUrl: string;
-
-  beforeAll((done) => {
-    const app = express();
-    app.use(express.json());
-    app.use("/api/transactions", transactionRoutes);
-
-    server = app.listen(0, () => {
-      const address = server.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${address.port}`;
-      done();
-    });
-  });
-
-  afterAll((done) => {
-    server.close(done);
-  });
-
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockWithLock.mockImplementation(
       async (_resource: string, fn: () => Promise<unknown>) => fn(),
     );
-
     mockTransactionLimitService.checkTransactionLimit.mockResolvedValue({
       allowed: true,
       kycLevel: "basic",
@@ -148,12 +141,13 @@ describe("transaction idempotency routes", () => {
       message: "",
       upgradeAvailable: false,
     });
-
     mockTransactionModel.releaseExpiredIdempotencyKey.mockResolvedValue(0);
     mockTransactionModel.findActiveByIdempotencyKey.mockResolvedValue(null);
-    mockAddTransactionJob.mockImplementation(async (_data: unknown, options?: { jobId?: string }) => ({
-      id: options?.jobId ?? "job-1",
-    }));
+    mockAddTransactionJob.mockImplementation(
+      async (_data: unknown, options?: { jobId?: string }) => ({
+        id: options?.jobId ?? "job-1",
+      }),
+    );
   });
 
   it("returns the existing transaction for duplicate deposit retries", async () => {
@@ -163,47 +157,30 @@ describe("transaction idempotency routes", () => {
     mockTransactionModel.findActiveByIdempotencyKey.mockImplementation(
       async () => activeTransaction,
     );
-
     mockTransactionModel.create.mockImplementation(async () => {
       activeTransaction = transaction;
       return transaction;
     });
 
-    const firstResponse = await fetch(`${baseUrl}/api/transactions/deposit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": "idem-123",
-      },
-      body: JSON.stringify(buildPayload()),
-    });
+    const firstResponse = await request(createApp())
+      .post("/api/transactions/deposit")
+      .set("Idempotency-Key", "idem-123")
+      .send(buildPayload());
 
-    const secondResponse = await fetch(`${baseUrl}/api/transactions/deposit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": "idem-123",
-      },
-      body: JSON.stringify(buildPayload()),
-    });
+    const secondResponse = await request(createApp())
+      .post("/api/transactions/deposit")
+      .set("Idempotency-Key", "idem-123")
+      .send(buildPayload());
 
     expect(firstResponse.status).toBe(200);
     expect(secondResponse.status).toBe(200);
-
-    await expect(firstResponse.json()).resolves.toEqual({
+    expect(firstResponse.body).toEqual({
       transactionId: "txn-1",
       referenceNumber: "TXN-20260325-0001",
       status: TransactionStatus.Pending,
       jobId: "txn-1",
     });
-
-    await expect(secondResponse.json()).resolves.toEqual({
-      transactionId: "txn-1",
-      referenceNumber: "TXN-20260325-0001",
-      status: TransactionStatus.Pending,
-      jobId: "txn-1",
-    });
-
+    expect(secondResponse.body).toEqual(firstResponse.body);
     expect(mockTransactionModel.create).toHaveBeenCalledTimes(1);
     expect(mockAddTransactionJob).toHaveBeenCalledTimes(1);
   });
@@ -218,30 +195,23 @@ describe("transaction idempotency routes", () => {
     mockTransactionModel.releaseExpiredIdempotencyKey.mockImplementation(
       async (key: string) => (key === "expired-key" ? 1 : 0),
     );
-
-    mockTransactionModel.findActiveByIdempotencyKey.mockResolvedValue(null);
     mockTransactionModel.create.mockResolvedValue(newTransaction);
 
-    const response = await fetch(`${baseUrl}/api/transactions/withdraw`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": "expired-key",
-      },
-      body: JSON.stringify(buildPayload()),
-    });
+    const response = await request(createApp())
+      .post("/api/transactions/withdraw")
+      .set("Idempotency-Key", "expired-key")
+      .send(buildPayload());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    expect(response.body).toEqual({
       transactionId: "txn-2",
       referenceNumber: "TXN-20260325-0002",
       status: TransactionStatus.Pending,
       jobId: "txn-2",
     });
-
-    expect(mockTransactionModel.releaseExpiredIdempotencyKey).toHaveBeenCalledWith(
-      "expired-key",
-    );
+    expect(
+      mockTransactionModel.releaseExpiredIdempotencyKey,
+    ).toHaveBeenCalledWith("expired-key");
     expect(mockTransactionModel.create).toHaveBeenCalledTimes(1);
   });
 
@@ -263,23 +233,18 @@ describe("transaction idempotency routes", () => {
       throw error;
     });
 
-    const response = await fetch(`${baseUrl}/api/transactions/deposit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": "idem-race",
-      },
-      body: JSON.stringify(buildPayload()),
-    });
+    const response = await request(createApp())
+      .post("/api/transactions/deposit")
+      .set("Idempotency-Key", "idem-race")
+      .send(buildPayload());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    expect(response.body).toEqual({
       transactionId: "txn-race",
       referenceNumber: "TXN-20260325-0099",
       status: TransactionStatus.Pending,
       jobId: "txn-race",
     });
-
     expect(mockTransactionModel.create).toHaveBeenCalledTimes(1);
     expect(mockAddTransactionJob).not.toHaveBeenCalled();
   });

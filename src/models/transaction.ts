@@ -81,6 +81,7 @@ export interface Transaction {
   webhook_delivered_at?: Date | null;
   webhook_last_error?: string | null;
   metadata: Record<string, unknown>;
+  userId?: string | null;
   createdAt: Date;
   updatedAt?: Date | null;
 }
@@ -131,6 +132,14 @@ export function mapTransactionRow(
       row.admin_notes != null && row.admin_notes !== ""
         ? String(row.admin_notes)
         : undefined,
+    metadata:
+      row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+        ? (row.metadata as Record<string, unknown>)
+        : {},
+    userId:
+      row.user_id != null || row.userId != null
+        ? String(row.user_id ?? row.userId)
+        : null,
     retryCount: Number(row.retry_count ?? 0),
     createdAt:
       created instanceof Date ? created : new Date(String(created ?? "")),
@@ -194,10 +203,15 @@ export class TransactionModel {
   }
 
   /** Paginated list, newest first. `limit` is capped at 100. */
-  async list(limit = 50, offset = 0, startDate?: string, endDate?: string): Promise<Transaction[]> {
+  async list(
+    limit = 50,
+    offset = 0,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<Transaction[]> {
     const capped = Math.min(Math.max(limit, 1), 100);
     const off = Math.max(offset, 0);
-    
+
     let query = "SELECT * FROM transactions WHERE 1=1";
     const params: any[] = [];
     let paramIndex = 1;
@@ -556,6 +570,24 @@ export class TransactionModel {
     );
   }
 
+  async releaseAllExpiredIdempotencyKeys(): Promise<number> {
+    const result = await pool.query<{ released: number }>(
+      `WITH updated AS (
+         UPDATE transactions
+         SET idempotency_key = NULL,
+             idempotency_expires_at = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE idempotency_key IS NOT NULL
+           AND idempotency_expires_at IS NOT NULL
+           AND idempotency_expires_at <= CURRENT_TIMESTAMP
+         RETURNING 1
+       )
+       SELECT COUNT(*)::int AS released FROM updated`,
+    );
+
+    return result.rows[0]?.released || 0;
+  }
+
   async findActiveByIdempotencyKey(
     idempotencyKey: string,
   ): Promise<Transaction | null> {
@@ -576,7 +608,8 @@ export class TransactionModel {
   }
 
   async countByStatuses(statuses: TransactionStatus[]): Promise<number> {
-    const validStatuses = statuses.length > 0 ? statuses : Object.values(TransactionStatus);
+    const validStatuses =
+      statuses.length > 0 ? statuses : Object.values(TransactionStatus);
     const result = await pool.query<{ total: number }>(
       `SELECT COUNT(*)::int AS total
        FROM transactions
@@ -594,7 +627,8 @@ export class TransactionModel {
   ): Promise<Transaction[]> {
     const capped = Math.min(Math.max(limit, 1), 1000);
     const off = Math.max(offset, 0);
-    const validStatuses = statuses.length > 0 ? statuses : Object.values(TransactionStatus);
+    const validStatuses =
+      statuses.length > 0 ? statuses : Object.values(TransactionStatus);
 
     const result = await pool.query<Transaction>(
       `SELECT ${TRANSACTION_SELECT_COLUMNS}

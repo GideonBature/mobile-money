@@ -3,19 +3,26 @@ import { z } from "zod";
 import { pool } from "../config/database";
 import { StellarService } from "../services/stellar/stellarService";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
-import { Transaction, TransactionModel, TransactionStatus } from "../models/transaction";
+import {
+  Transaction,
+  TransactionModel,
+  TransactionStatus,
+} from "../models/transaction";
 import { lockManager, LockKeys } from "../utils/lock";
 import { TransactionLimitService } from "../services/transactionLimit/transactionLimitService";
 import { KYCService } from "../services/kyc/kycService";
-import { MobileMoneyProvider, validateProviderLimits } from "../config/providers";
 import {
-import type { TransactionJobData } from "../queue/transactionQueue";
+  MobileMoneyProvider,
+  validateProviderLimits,
+} from "../config/providers";
+import {
   CancelTransactionResponse,
   LimitExceededErrorResponse,
   PhoneSearchResponse,
   TransactionDetailResponse,
   TransactionResponse,
 } from "../types/api";
+import type { TransactionJobData } from "../queue/transactionQueue";
 
 const IDEMPOTENCY_TTL_HOURS = Number(
   process.env.IDEMPOTENCY_KEY_TTL_HOURS || 24,
@@ -115,7 +122,10 @@ export const getTransactionHistoryHandler = async (
         .json({ error: "startDate cannot be greater than endDate" });
     }
 
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit as string) || 20));
+    const limitNum = Math.max(
+      1,
+      Math.min(100, parseInt(limit as string) || 20),
+    );
     const offsetNum = Math.max(0, parseInt(offset as string) || 0);
 
     const [transactions, total] = await Promise.all([
@@ -216,14 +226,16 @@ async function processTransactionRequest(
 
     const requestAmount = getRequestAmount(amount);
     if (!Number.isFinite(requestAmount) || requestAmount <= 0) {
-      return res.status(400).json({ error: "Amount must be a positive number" });
+      return res
+        .status(400)
+        .json({ error: "Amount must be a positive number" });
     }
 
     const idempotencyKey = getIdempotencyKey(req);
 
     const providerLimitCheck = validateProviderLimits(
       provider as MobileMoneyProvider,
-      parseFloat(amount)
+      parseFloat(amount),
     );
     if (!providerLimitCheck.valid) {
       return res.status(400).json({ error: providerLimitCheck.error });
@@ -485,10 +497,7 @@ export const updateNotesHandler = async (req: Request, res: Response) => {
   }
 };
 
-export const updateAdminNotesHandler = async (
-  req: Request,
-  res: Response,
-) => {
+export const updateAdminNotesHandler = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { admin_notes: adminNotes } = req.body;
@@ -532,12 +541,16 @@ export const searchTransactionsHandler = async (
 
     if (!/^\+?\d{1,20}$/.test(sanitized)) {
       return res.status(400).json({
-        error: "Invalid phone number format. Use digits only, optional leading +",
+        error:
+          "Invalid phone number format. Use digits only, optional leading +",
       });
     }
 
     const pageNum = Math.max(1, parseInt(page as string) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit as string) || 50));
+    const limitNum = Math.max(
+      1,
+      Math.min(100, parseInt(limit as string) || 50),
+    );
     const offset = (pageNum - 1) * limitNum;
 
     const { transactions, total } = await transactionModel.searchByPhoneNumber(

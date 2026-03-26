@@ -21,7 +21,7 @@
     "migrate:down": "tsx src/scripts/migrate.ts down",
     "migrate:create": "tsx src/scripts/migrate.ts create",
     "migrate:status": "tsx src/scripts/migrate.ts status",
-  "seed": "tsx src/scripts/seed.ts",
+    "seed": "tsx src/scripts/seed.ts",
     "postinstall": "npm run prepare"
   },
   "lint-staged": {
@@ -40,6 +40,7 @@
     "bcrypt": "^6.0.0",
     "bullmq": "^5.71.1",
     "compression": "^1.7.4",
+    "connect-redis": "^7.1.1",
     "connect-timeout": "^1.9.0",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
@@ -74,6 +75,7 @@
     "@types/connect-timeout": "^0.0.38",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/express-session": "^1.18.2",
     "@types/jest": "^29.5.14",
     "@types/js-yaml": "^4.0.9",
     "@types/jsonwebtoken": "^9.0.10",

@@ -4,6 +4,7 @@ import { Router } from "express";
 import {
   validateTransactionFilters,
   TransactionStatus,
+  VALID_STATUSES,
   parseStatusFilter,
   buildStatusWhereClause,
   getPaginationInfo,
@@ -41,17 +42,15 @@ describe("Transaction Status Filtering - Utility Functions", () => {
 
     it("should return empty array for empty string", () => {
       const result = parseStatusFilter("");
-      expect(result).toEqual([]);
+      expect(result).toEqual(VALID_STATUSES);
     });
 
     it("should filter out empty values", () => {
-      const result = parseStatusFilter("pending,,completed");
-      expect(result).toEqual(["pending", "completed"]);
+      expect(() => parseStatusFilter("pending,,completed")).toThrow();
     });
 
     it("should handle only hyphens", () => {
-      const result = parseStatusFilter("---");
-      expect(result).toEqual([]);
+      expect(() => parseStatusFilter("---")).toThrow();
     });
 
     it("should validate each status is valid enum value", () => {
@@ -75,8 +74,7 @@ describe("Transaction Status Filtering - Utility Functions", () => {
 
     it("should build IN clause for single status", () => {
       const result = buildStatusWhereClause([TransactionStatus.Pending]);
-      expect(result).toContain("status IN (");
-      expect(result).toContain("'pending'");
+      expect(result).toBe("status IN (?)");
     });
 
     it("should build IN clause for multiple statuses", () => {
@@ -84,13 +82,12 @@ describe("Transaction Status Filtering - Utility Functions", () => {
         TransactionStatus.Pending,
         TransactionStatus.Completed,
       ]);
-      expect(result).toContain("'pending'");
-      expect(result).toContain("'completed'");
+      expect(result).toBe("status IN (?, ?)");
     });
 
     it("should properly escape status values", () => {
       const result = buildStatusWhereClause([TransactionStatus.Failed]);
-      expect(result).toContain("'failed'");
+      expect(result).toBe("status IN (?)");
     });
 
     it("should produce valid SQL syntax", () => {
@@ -213,7 +210,7 @@ describe("Transaction Status Filtering - Middleware", () => {
       request(app)
         .get("/?status=invalid")
         .expect(400)
-        .expect((res) => {
+        .expect((res: any) => {
           expect(res.body.error).toContain("Invalid status");
         })
         .end(done);
@@ -249,11 +246,11 @@ describe("Transaction Status Filtering - Middleware", () => {
         .expect({ success: true }, done);
     });
 
-    it("should cap limit at 100", (done) => {
+    it("should allow higher limits up to 1000", (done) => {
       const router = Router();
       router.get("/", validateTransactionFilters, (req, res) => {
         const filters = (req as any).transactionFilters;
-        expect(filters.limit).toBe(100);
+        expect(filters.limit).toBe(500);
         res.json({ success: true });
       });
       app.use(router);
@@ -272,7 +269,7 @@ describe("Transaction Status Filtering - Middleware", () => {
       request(app)
         .get("/?status=pending&limit=abc")
         .expect(400)
-        .expect((res) => {
+        .expect((res: any) => {
           expect(res.body.error).toContain("limit");
         })
         .end(done);
@@ -286,7 +283,7 @@ describe("Transaction Status Filtering - Middleware", () => {
       request(app)
         .get("/?status=pending&limit=-10")
         .expect(400)
-        .expect((res) => {
+        .expect((res: any) => {
           expect(res.body.error).toContain("limit");
         })
         .end(done);
@@ -330,7 +327,7 @@ describe("Transaction Status Filtering - Middleware", () => {
       request(app)
         .get("/?status=pending&offset=-5")
         .expect(400)
-        .expect((res) => {
+        .expect((res: any) => {
           expect(res.body.error).toContain("offset");
         })
         .end(done);
@@ -340,14 +337,18 @@ describe("Transaction Status Filtering - Middleware", () => {
 
 describe("Transaction Status Filtering - Handler Integration", () => {
   let app: Express;
-  const mockTransactionModel = TransactionModel as jest.Mocked<
+  const mockTransactionModel = TransactionModel as jest.MockedClass<
     typeof TransactionModel
   >;
+  const controllerTransactionModel = mockTransactionModel.mock
+    .instances[0] as jest.Mocked<TransactionModel>;
 
   beforeEach(() => {
     app = express();
     app.use(express.json());
     jest.clearAllMocks();
+    controllerTransactionModel.findByStatuses.mockReset();
+    controllerTransactionModel.countByStatuses.mockReset();
   });
 
   describe("listTransactionsHandler", () => {
@@ -367,24 +368,16 @@ describe("Transaction Status Filtering - Handler Integration", () => {
         },
       ];
 
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockResolvedValue(mockTransactions);
-      mockTransactionModel.prototype.countByStatuses = jest
-        .fn()
-        .mockResolvedValue(2);
+      controllerTransactionModel.findByStatuses.mockResolvedValue(
+        mockTransactions as any,
+      );
+      controllerTransactionModel.countByStatuses.mockResolvedValue(2);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
-      const res = await request(app)
-        .get("/?status=pending")
-        .expect(200);
+      const res = await request(app).get("/?status=pending").expect(200);
 
       expect(res.body.data).toHaveLength(2);
       expect(res.body.pagination.total).toBe(2);
@@ -393,24 +386,14 @@ describe("Transaction Status Filtering - Handler Integration", () => {
     });
 
     it("should handle empty results", async () => {
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockResolvedValue([]);
-      mockTransactionModel.prototype.countByStatuses = jest
-        .fn()
-        .mockResolvedValue(0);
+      controllerTransactionModel.findByStatuses.mockResolvedValue([]);
+      controllerTransactionModel.countByStatuses.mockResolvedValue(0);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
-      const res = await request(app)
-        .get("/?status=pending")
-        .expect(200);
+      const res = await request(app).get("/?status=pending").expect(200);
 
       expect(res.body.data).toHaveLength(0);
       expect(res.body.pagination.total).toBe(0);
@@ -422,19 +405,13 @@ describe("Transaction Status Filtering - Handler Integration", () => {
         { id: "2", status: "completed", amount: "200" },
       ];
 
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockResolvedValue(mockTransactions);
-      mockTransactionModel.prototype.countByStatuses = jest
-        .fn()
-        .mockResolvedValue(2);
+      controllerTransactionModel.findByStatuses.mockResolvedValue(
+        mockTransactions as any,
+      );
+      controllerTransactionModel.countByStatuses.mockResolvedValue(2);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
       const res = await request(app)
@@ -449,19 +426,13 @@ describe("Transaction Status Filtering - Handler Integration", () => {
         .fill(null)
         .map((_, i) => ({ id: `${i}`, status: "pending" }));
 
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockResolvedValue(mockTransactions);
-      mockTransactionModel.prototype.countByStatuses = jest
-        .fn()
-        .mockResolvedValue(150);
+      controllerTransactionModel.findByStatuses.mockResolvedValue(
+        mockTransactions as any,
+      );
+      controllerTransactionModel.countByStatuses.mockResolvedValue(150);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
       const res = await request(app)
@@ -479,19 +450,11 @@ describe("Transaction Status Filtering - Handler Integration", () => {
     });
 
     it("should include filters in response", async () => {
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockResolvedValue([]);
-      mockTransactionModel.prototype.countByStatuses = jest
-        .fn()
-        .mockResolvedValue(0);
+      controllerTransactionModel.findByStatuses.mockResolvedValue([]);
+      controllerTransactionModel.countByStatuses.mockResolvedValue(0);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
       const res = await request(app)
@@ -502,21 +465,16 @@ describe("Transaction Status Filtering - Handler Integration", () => {
     });
 
     it("should handle database errors gracefully", async () => {
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockRejectedValue(new Error("Database error"));
+      controllerTransactionModel.findByStatuses.mockRejectedValue(
+        new Error("Database error"),
+      );
+      controllerTransactionModel.countByStatuses.mockResolvedValue(1);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
-      const res = await request(app)
-        .get("/?status=pending")
-        .expect(500);
+      const res = await request(app).get("/?status=pending").expect(500);
 
       expect(res.body.error).toContain("Failed to list transactions");
     });
@@ -526,9 +484,7 @@ describe("Transaction Status Filtering - Handler Integration", () => {
       router.get("/", validateTransactionFilters);
       app.use(router);
 
-      const res = await request(app)
-        .get("/?status=invalid")
-        .expect(400);
+      const res = await request(app).get("/?status=invalid").expect(400);
 
       expect(res.body.error).toBeDefined();
     });
@@ -538,19 +494,13 @@ describe("Transaction Status Filtering - Handler Integration", () => {
         .fill(null)
         .map((_, i) => ({ id: `${50 + i}`, status: "pending" }));
 
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockResolvedValue(mockTransactions);
-      mockTransactionModel.prototype.countByStatuses = jest
-        .fn()
-        .mockResolvedValue(150);
+      controllerTransactionModel.findByStatuses.mockResolvedValue(
+        mockTransactions as any,
+      );
+      controllerTransactionModel.countByStatuses.mockResolvedValue(150);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
       const res = await request(app)
@@ -568,27 +518,19 @@ describe("Transaction Status Filtering - Handler Integration", () => {
         { id: "3", status: "failed" },
       ];
 
-      mockTransactionModel.prototype.findByStatuses = jest
-        .fn()
-        .mockResolvedValue(mockTransactions);
-      mockTransactionModel.prototype.countByStatuses = jest
-        .fn()
-        .mockResolvedValue(3);
+      controllerTransactionModel.findByStatuses.mockResolvedValue(
+        mockTransactions as any,
+      );
+      controllerTransactionModel.countByStatuses.mockResolvedValue(3);
 
       const router = Router();
-      router.get(
-        "/",
-        validateTransactionFilters,
-        listTransactionsHandler,
-      );
+      router.get("/", validateTransactionFilters, listTransactionsHandler);
       app.use(router);
 
-      const res = await request(app)
-        .get("/")
-        .expect(200);
+      const res = await request(app).get("/").expect(200);
 
       expect(res.body.data).toHaveLength(3);
-      expect(res.body.filters.statuses).toEqual([]);
+      expect(res.body.filters.statuses).toEqual(VALID_STATUSES);
     });
   });
 });

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { randomUUID } from "crypto";
 
 export class MTNProvider {
   private apiKey: string;
@@ -19,7 +20,7 @@ export class MTNProvider {
         {
           amount,
           currency: "EUR",
-          externalId: Date.now().toString(),
+          externalId: randomUUID(),
           payer: { partyIdType: "MSISDN", partyId: phoneNumber },
           payerMessage: "Payment for Stellar deposit",
           payeeNote: "Deposit",

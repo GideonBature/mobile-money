@@ -56,6 +56,17 @@ preflight responses:
 CORS_MAX_AGE=86400
 ```
 
+For OAuth2-enabled API access, also configure a client, redirect URI, and JWT
+signing secret in your local `.env`:
+
+```bash
+ADMIN_API_KEY=dev-admin-key
+OAUTH_CLIENT_ID=mobile-money-client
+OAUTH_CLIENT_SECRET=replace-with-a-secure-client-secret
+OAUTH_REDIRECT_URI=http://localhost:3000/oauth/callback
+OAUTH_JWT_SECRET=replace-with-a-dedicated-oauth-jwt-secret
+```
+
 ### Production
 
 ```bash
@@ -129,6 +140,64 @@ Access-Control-Max-Age: 86400
 
 In a browser, the Network tab should show fewer repeated `OPTIONS` requests for
 the same origin, method, and headers until the cache expires.
+
+### Verify OAuth2 Authentication
+
+The API exposes an OAuth2 authorization-code flow with JWT access tokens and
+rotating refresh tokens:
+
+- `GET /oauth/authorize`
+- `POST /oauth/token`
+
+This implementation uses the existing administrative API key to authorize the
+resource owner step until a dedicated end-user login screen exists. The
+authorization endpoint requires:
+
+- `X-API-Key: <ADMIN_API_KEY>`
+- `response_type=code`
+- `client_id`
+- `redirect_uri`
+- `subject`
+
+Example authorization request:
+
+```bash
+curl -i "http://localhost:3000/oauth/authorize?response_type=code&client_id=mobile-money-client&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Foauth%2Fcallback&subject=user-123&scope=reports%3Aread&state=abc123" \
+  -H "X-API-Key: dev-admin-key"
+```
+
+The response redirects to the configured callback with `code` and `state`.
+
+Exchange that code for tokens:
+
+```bash
+curl -X POST http://localhost:3000/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code" \
+  -d "client_id=mobile-money-client" \
+  -d "client_secret=replace-with-a-secure-client-secret" \
+  -d "redirect_uri=http://localhost:3000/oauth/callback" \
+  -d "code=<authorization-code>"
+```
+
+Refresh an access token:
+
+```bash
+curl -X POST http://localhost:3000/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=refresh_token" \
+  -d "client_id=mobile-money-client" \
+  -d "client_secret=replace-with-a-secure-client-secret" \
+  -d "refresh_token=<refresh-token>"
+```
+
+Access tokens expire after 1 hour by default. Refresh tokens expire after 30
+days by default and are rotated on every refresh. Authorization codes expire
+after 5 minutes. Access protected endpoints by sending:
+
+```bash
+Authorization: Bearer <access-token>
+```
 
 ### Coverage Requirements
 
@@ -297,7 +366,7 @@ Send an `Idempotency-Key` header on `POST /api/transactions/deposit` and
 ### Statistics & Metrics
 
 - `GET /api/stats` - Get system-wide statistics (Total transactions, success rate, total volume, active users, and volume by provider).
-- **Authentication**: Requires a valid administrative API key in the `X-API-Key` header.
+- **Authentication**: Requires a valid administrative API key in the `X-API-Key` header or a valid OAuth bearer token in the `Authorization` header.
 - **Cache**: Results are cached for 15 minutes.
 - **Filters**: Supports `startDate` and `endDate` query parameters (ISO format).
 
@@ -381,6 +450,7 @@ npm run seed
 ```
 
 Notes:
+
 - Idempotent: repeated runs won't duplicate records (uses UPSERT / ON CONFLICT DO NOTHING).
 - Creates a few sample users and a mix of transactions (completed, pending, failed) across providers.
 - Intended for local/dev environments only; the script will exit if NODE_ENV !== development.

@@ -4,8 +4,12 @@
  */
 
 import request from "supertest";
-import express from "express";
-import { apiVersionMiddleware, validateVersionMiddleware, VersionedRequest } from "../../src/middleware/apiVersion";
+import express, { Response as ExpressResponse } from "express";
+import {
+  apiVersionMiddleware,
+  validateVersionMiddleware,
+  VersionedRequest,
+} from "../src/middleware/apiVersion";
 
 describe("API Versioning", () => {
   let app: express.Application;
@@ -17,7 +21,13 @@ describe("API Versioning", () => {
     app.use(validateVersionMiddleware);
 
     // Test endpoint
-    app.get("/api/:version/test", (req: VersionedRequest, res) => {
+    app.get(
+      "/api/:version/test",
+      (req: VersionedRequest, res: ExpressResponse) => {
+        res.json({ version: req.apiVersion, data: "test" });
+      },
+    );
+    app.get("/api/test", (req: VersionedRequest, res: ExpressResponse) => {
       res.json({ version: req.apiVersion, data: "test" });
     });
   });
@@ -27,9 +37,11 @@ describe("API Versioning", () => {
       request(app)
         .get("/api/v1/test")
         .expect(200)
-        .expect((res) => {
-          if (res.body.version !== "v1") throw new Error("Version not extracted");
-          if (res.headers["api-version"] !== "v1") throw new Error("Version header not set");
+        .expect((res: any) => {
+          if (res.body.version !== "v1")
+            throw new Error("Version not extracted");
+          if (res.headers["api-version"] !== "v1")
+            throw new Error("Version header not set");
         })
         .end(done);
     });
@@ -37,8 +49,9 @@ describe("API Versioning", () => {
     it("should set API-Version header", (done) => {
       request(app)
         .get("/api/v1/test")
-        .expect((res) => {
-          if (!res.headers["api-version"]) throw new Error("Missing API-Version header");
+        .expect((res: any) => {
+          if (!res.headers["api-version"])
+            throw new Error("Missing API-Version header");
         })
         .end(done);
     });
@@ -46,7 +59,7 @@ describe("API Versioning", () => {
     it("should set Vary header", (done) => {
       request(app)
         .get("/api/v1/test")
-        .expect((res) => {
+        .expect((res: any) => {
           if (!res.headers["vary"]) throw new Error("Missing Vary header");
         })
         .end(done);
@@ -59,8 +72,9 @@ describe("API Versioning", () => {
         .get("/api/test")
         .set("Accept", "application/json;version=v1")
         .expect(200)
-        .expect((res) => {
-          if (res.headers["api-version"] !== "v1") throw new Error("Accept header version not used");
+        .expect((res: any) => {
+          if (res.headers["api-version"] !== "v1")
+            throw new Error("Accept header version not used");
         })
         .end(done);
     });
@@ -69,8 +83,9 @@ describe("API Versioning", () => {
       request(app)
         .get("/api/v1/test")
         .set("Accept", "application/json;version=v2")
-        .expect((res) => {
-          if (res.headers["api-version"] !== "v1") throw new Error("URL path priority failed");
+        .expect((res: any) => {
+          if (res.headers["api-version"] !== "v1")
+            throw new Error("URL path priority failed");
         })
         .end(done);
     });
@@ -81,7 +96,7 @@ describe("API Versioning", () => {
       request(app)
         .get("/api/v99/test")
         .expect(400)
-        .expect((res) => {
+        .expect((res: any) => {
           if (!res.body.error || res.body.error !== "Unsupported API Version") {
             throw new Error("Version validation failed");
           }
@@ -92,9 +107,11 @@ describe("API Versioning", () => {
     it("should return supported versions in error", (done) => {
       request(app)
         .get("/api/v99/test")
-        .expect((res) => {
-          if (!res.body.supportedVersions) throw new Error("Supported versions not returned");
-          if (!Array.isArray(res.body.supportedVersions)) throw new Error("Supported versions not array");
+        .expect((res: any) => {
+          if (!res.body.supportedVersions)
+            throw new Error("Supported versions not returned");
+          if (!Array.isArray(res.body.supportedVersions))
+            throw new Error("Supported versions not array");
         })
         .end(done);
     });
@@ -104,38 +121,39 @@ describe("API Versioning", () => {
     it("should default to v1 for unversioned endpoints", (done) => {
       request(app)
         .get("/api/test")
-        .expect((res) => {
-          if (res.headers["api-version"] !== "v1") throw new Error("Default version not v1");
+        .expect((res: any) => {
+          if (res.headers["api-version"] !== "v1")
+            throw new Error("Default version not v1");
         })
         .end(done);
     });
 
     it("should support legacy /api/ paths", (done) => {
-      request(app)
-        .get("/api/test")
-        .expect(200)
-        .end(done);
+      request(app).get("/api/test").expect(200).end(done);
     });
   });
 
   describe("Multi-Version Support", () => {
     it("should handle multiple requests with different versions", (done) => {
       Promise.all([
-        new Promise((resolve) => {
+        new Promise<void>((resolve, reject) => {
           request(app)
             .get("/api/v1/test")
             .expect(200)
-            .end((err) => resolve(err));
+            .end((err: Error | null) => (err ? reject(err) : resolve()));
         }),
-      ]).then(() => done()).catch(done);
+      ])
+        .then(() => done())
+        .catch(done);
     });
 
     it("should maintain independent version contexts", (done) => {
       request(app)
         .get("/api/v1/test")
         .expect(200)
-        .expect((res) => {
-          if (res.body.version !== "v1") throw new Error("Version context not maintained");
+        .expect((res: any) => {
+          if (res.body.version !== "v1")
+            throw new Error("Version context not maintained");
         })
         .end(done);
     });
@@ -145,8 +163,9 @@ describe("API Versioning", () => {
     it("should include version in all responses", (done) => {
       request(app)
         .get("/api/v1/test")
-        .expect((res) => {
-          if (!res.headers["api-version"]) throw new Error("Missing version header");
+        .expect((res: any) => {
+          if (!res.headers["api-version"])
+            throw new Error("Missing version header");
         })
         .end(done);
     });
@@ -154,9 +173,10 @@ describe("API Versioning", () => {
     it("should include Vary header for caching", (done) => {
       request(app)
         .get("/api/v1/test")
-        .expect((res) => {
+        .expect((res: any) => {
           if (!res.headers["vary"]) throw new Error("Missing Vary header");
-          if (!res.headers["vary"].includes("Accept")) throw new Error("Vary should include Accept");
+          if (!res.headers["vary"].includes("Accept"))
+            throw new Error("Vary should include Accept");
         })
         .end(done);
     });
@@ -166,7 +186,7 @@ describe("API Versioning", () => {
     it("should handle malformed version strings", (done) => {
       request(app)
         .get("/api/invalid/test")
-        .expect((res) => {
+        .expect((res: any) => {
           // Should either use default or reject
           if (res.status !== 200 && res.status !== 400) {
             throw new Error("Unexpected status code");
@@ -179,7 +199,7 @@ describe("API Versioning", () => {
       request(app)
         .get("/api/v99/test")
         .expect(400)
-        .expect((res) => {
+        .expect((res: any) => {
           if (!res.body.message) throw new Error("No error message provided");
         })
         .end(done);
