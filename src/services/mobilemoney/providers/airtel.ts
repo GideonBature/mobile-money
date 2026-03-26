@@ -1,4 +1,18 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosInstance, AxiosError } from "axios";
+
+// This interface is now used in the methods below
+interface AirtelResponse {
+  data?: {
+    transaction?: {
+      status: string;
+      id: string;
+    };
+  };
+  status?: {
+    success: boolean;
+    code: string;
+  };
+}
 
 export class AirtelService {
   private client: AxiosInstance;
@@ -57,6 +71,11 @@ export class AirtelService {
         return await fn();
       } catch (err) {
         lastError = err as Error;
+        const axiosError = err as AxiosError;
+
+        if (axiosError.response?.status === 401) {
+          this.token = null;
+        }
 
         // Retry only for transient errors
         if (
@@ -87,7 +106,8 @@ export class AirtelService {
 
     return this.withRetry(async () => {
       try {
-        const response = await this.client.post(
+        // Apply AirtelResponse here
+        const response = await this.client.post<AirtelResponse>(
           "/merchant/v1/payments/",
           {
             reference,
@@ -119,11 +139,6 @@ export class AirtelService {
     });
   }
 
-  /**
-   * =========================
-   * CHECK TRANSACTION STATUS
-   * =========================
-   */
   async checkStatus(reference: string) {
     const token = await this.authenticate();
 
@@ -157,7 +172,8 @@ export class AirtelService {
 
     return this.withRetry(async () => {
       try {
-        const response = await this.client.post(
+        // Apply AirtelResponse here
+        const response = await this.client.post<AirtelResponse>(
           "/standard/v1/disbursements/",
           {
             reference,

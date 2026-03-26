@@ -1,5 +1,5 @@
 import { MTNProvider } from "./providers/mtn";
-import { AirtelService } from "./providers/airtel";
+import { AirtelProvider } from "./providers/airtel";
 import { OrangeProvider } from "./providers/orange";
 import {
   transactionTotal,

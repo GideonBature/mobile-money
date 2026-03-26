@@ -5,7 +5,8 @@ export const STELLAR_NETWORKS = {
   MAINNET: "mainnet",
 } as const;
 
-export type StellarNetwork = (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
+export type StellarNetwork =
+  (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
 
 const HORIZON_URLS = {
   [STELLAR_NETWORKS.TESTNET]: "https://horizon-testnet.stellar.org",
@@ -25,9 +26,11 @@ export const validateStellarNetwork = () => {
     return;
   }
 
-  if (!Object.values(STELLAR_NETWORKS).includes(network as any)) {
+  // FIX: Change 'network as any' to 'network as StellarNetwork' or 'network as string'
+  const validNetworks: string[] = Object.values(STELLAR_NETWORKS);
+  if (!validNetworks.includes(network)) {
     throw new Error(
-      `Invalid STELLAR_NETWORK: ${network}. Must be 'testnet' or 'mainnet'`
+      `Invalid STELLAR_NETWORK: ${network}. Must be 'testnet' or 'mainnet'`,
     );
   }
 
@@ -38,7 +41,7 @@ export const validateStellarNetwork = () => {
     process.env.ALLOW_MAINNET_IN_DEV !== "true"
   ) {
     throw new Error(
-      "CRITICAL: Mainnet is disabled in development mode. Set ALLOW_MAINNET_IN_DEV=true to override."
+      "CRITICAL: Mainnet is disabled in development mode. Set ALLOW_MAINNET_IN_DEV=true to override.",
     );
   }
 };
@@ -49,7 +52,7 @@ export const logStellarNetwork = () => {
   console.log(`[Stellar] Current Network: ${network.toUpperCase()}`);
   if (network === STELLAR_NETWORKS.MAINNET) {
     console.warn(
-      "⚠️  WARNING: Using Stellar MAINNET. Real assets are being moved!"
+      "⚠️  WARNING: Using Stellar MAINNET. Real assets are being moved!",
     );
   }
 };

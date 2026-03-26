@@ -99,8 +99,6 @@ beforeEach(() => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe("pingProvider()", () => {
-  // ── Happy paths ─────────────────────────────────────────────────────────────
-
   it("returns status=up and a non-negative responseTime for HTTP 200", async () => {
     const result = await pingProvider(MTN, fakeFetch(200));
     expect(result.status).toBe("up");
@@ -122,8 +120,6 @@ describe("pingProvider()", () => {
     const result = await pingProvider(MTN, fakeFetch(404));
     expect(result.status).toBe("up");
   });
-
-  // ── Error paths ─────────────────────────────────────────────────────────────
 
   it("returns status=down for HTTP 500", async () => {
     const result = await pingProvider(MTN, fakeFetch(500));
@@ -148,8 +144,6 @@ describe("pingProvider()", () => {
     expect(result.responseTime).toBeNull();
   }, 5_000);
 
-  // ── Never throws ────────────────────────────────────────────────────────────
-
   it("never rejects even when fetch throws a non-Error", async () => {
     const weirdFetch: typeof fetch = async () => {
       throw "string error";
@@ -166,7 +160,6 @@ describe("pingProvider()", () => {
 
 describe("Circuit breaker", () => {
   it("opens the circuit after 3 consecutive failures", async () => {
-    // Three failures open the circuit
     for (let i = 0; i < 3; i++) {
       await pingProvider(MTN, failingFetch());
     }
@@ -175,7 +168,6 @@ describe("Circuit breaker", () => {
   });
 
   it("returns down immediately (without calling fetch) while circuit is open", async () => {
-    // Open the circuit
     for (let i = 0; i < 3; i++) {
       await pingProvider(MTN, failingFetch());
     }
@@ -184,32 +176,29 @@ describe("Circuit breaker", () => {
     const result = await pingProvider(MTN, spy);
 
     expect(result.status).toBe("down");
-    expect(calls()).toBe(0); // no network call made
+    expect(calls()).toBe(0);
   });
 
   it("does not open the circuit on intermittent failures below threshold", async () => {
-    await pingProvider(MTN, failingFetch()); // fail 1
-    await pingProvider(MTN, fakeFetch(200)); // success — resets counter
-    await pingProvider(MTN, failingFetch()); // fail 1 again
+    await pingProvider(MTN, failingFetch());
+    await pingProvider(MTN, fakeFetch(200));
+    await pingProvider(MTN, failingFetch());
 
     const state = _circuitMap.get("mtn");
-    expect(state?.openUntil).toBe(0); // still closed
+    expect(state?.openUntil).toBe(0);
   });
 
   it("resets the failure counter on success", async () => {
     await pingProvider(MTN, failingFetch());
     await pingProvider(MTN, failingFetch());
-    await pingProvider(MTN, fakeFetch(200)); // success
+    await pingProvider(MTN, fakeFetch(200));
     const state = _circuitMap.get("mtn");
     expect(state?.failures).toBe(0);
     expect(state?.openUntil).toBe(0);
   });
 
   it("isolates circuit state per provider", async () => {
-    // Open MTN's circuit
     for (let i = 0; i < 3; i++) await pingProvider(MTN, failingFetch());
-
-    // Airtel should still work
     const result = await pingProvider(AIRTEL, fakeFetch(200));
     expect(result.status).toBe("up");
   });
@@ -220,8 +209,6 @@ describe("Circuit breaker", () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe("checkMobileMoneyHealth()", () => {
-  // ── Response shape ──────────────────────────────────────────────────────────
-
   it("includes a key for every configured provider", async () => {
     const result = await checkMobileMoneyHealth(ALL, fakeFetch(200));
     expect(Object.keys(result.providers).sort()).toEqual([
@@ -240,7 +227,6 @@ describe("checkMobileMoneyHealth()", () => {
   });
 
   it("matches the documented response shape with a downed provider", async () => {
-    // orange is down; mtn and airtel are up
     const mixedFetch: typeof fetch = async (url, init) => {
       if (String(url).includes("orange")) throw new Error("no route");
       return fakeFetch(200)(url, init);
@@ -257,8 +243,6 @@ describe("checkMobileMoneyHealth()", () => {
       });
   });
 
-  // ── Safety guarantees ────────────────────────────────────────────────────────
-
   it("never rejects when all providers fail", async () => {
     await expect(
       checkMobileMoneyHealth(ALL, failingFetch()),
@@ -274,35 +258,26 @@ describe("checkMobileMoneyHealth()", () => {
     ).resolves.toBeDefined();
   });
 
-  // ── Caching (in-process) ────────────────────────────────────────────────────
-
   it("serves the second call from cache without hitting the network", async () => {
     const { fetch: spy, calls } = countingFetch(fakeFetch(200));
-
-    await checkMobileMoneyHealth([MTN], spy); // populates cache
-    await checkMobileMoneyHealth([MTN], spy); // should hit cache
-
+    await checkMobileMoneyHealth([MTN], spy);
+    await checkMobileMoneyHealth([MTN], spy);
     expect(calls()).toBe(1);
   });
 
   it("re-fetches after the cache is explicitly cleared", async () => {
     const { fetch: spy, calls } = countingFetch(fakeFetch(200));
-
     await checkMobileMoneyHealth([MTN], spy);
     _clearCache();
     await checkMobileMoneyHealth([MTN], spy);
-
     expect(calls()).toBe(2);
   });
 
   it("re-fetches after the in-process cache has expired", async () => {
     const { fetch: spy, calls } = countingFetch(fakeFetch(200));
-
     await checkMobileMoneyHealth([MTN], spy);
-    // Manually expire the cache
     _inProcessCache.expiresAt = Date.now() - 1;
     await checkMobileMoneyHealth([MTN], spy);
-
     expect(calls()).toBe(2);
   });
 
@@ -312,10 +287,7 @@ describe("checkMobileMoneyHealth()", () => {
     expect(first).toBe(second);
   });
 
-  // ── Concurrency ─────────────────────────────────────────────────────────────
-
   it("pings all providers concurrently (does not serialise)", async () => {
-    // Each provider takes ~50 ms; if serialised total ≥ 150 ms
     const delay = (ms: number): Promise<void> =>
       new Promise((r) => setTimeout(r, ms));
 
@@ -328,12 +300,8 @@ describe("checkMobileMoneyHealth()", () => {
     await checkMobileMoneyHealth(ALL, slowFetch);
     const elapsed = Date.now() - before;
 
-    // Concurrent: elapsed should be ~50 ms, not ~150 ms
-    // We allow up to 130 ms to avoid flakiness in slow CI environments
     expect(elapsed).toBeLessThan(130);
   }, 10_000);
-
-  // ── Single provider subset ───────────────────────────────────────────────────
 
   it("works correctly with a single-provider list", async () => {
     const result = await checkMobileMoneyHealth([AIRTEL], fakeFetch(200));

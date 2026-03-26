@@ -101,7 +101,13 @@ export class StellarService {
         .build();
 
       transaction.sign(this.issuerKeypair);
-      await this.server.submitTransaction(transaction);
+      const response: StellarSdk.Horizon.HorizonApi.SubmitTransactionResponse =
+        await this.server.submitTransaction(transaction);
+
+      console.log("Stellar payment successful", {
+        hash: response.hash,
+        ledger: response.ledger,
+      });
 
       transactionTotal.inc({
         type: "stellar_payment",

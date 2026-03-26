@@ -39,7 +39,7 @@ transactionRoutes.post(
   TimeoutPresets.long,
   haltOnTimedout,
   validateTransaction,
-  depositHandler
+  depositHandler,
 );
 
 transactionRoutes.post(
@@ -48,7 +48,7 @@ transactionRoutes.post(
   TimeoutPresets.long,
   haltOnTimedout,
   validateTransaction,
-  withdrawHandler
+  withdrawHandler,
 );
 
 transactionRoutes.get(

@@ -468,9 +468,8 @@ export const updateNotesHandler = async (req: Request, res: Response) => {
     }
 
     const transaction = await transactionModel.updateNotes(id, notes);
-    if (!transaction) {
+    if (!transaction)
       return res.status(404).json({ error: "Transaction not found" });
-    }
 
     return res.json(transaction);
   } catch (err) {
@@ -500,7 +499,6 @@ export const updateAdminNotesHandler = async (
     const transaction = await transactionModel.updateAdminNotes(id, adminNotes);
     if (!transaction) {
       return res.status(404).json({ error: "Transaction not found" });
-    }
 
     return res.json(transaction);
   } catch (err) {
