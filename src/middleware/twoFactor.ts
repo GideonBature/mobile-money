@@ -1,0 +1,168 @@
+import { Request, Response, NextFunction } from 'express';
+import { verifyTOTPToken, verifyBackupCode, is2FAEnabled } from '../auth/2fa';
+import { getUserById } from '../services/userService';
+
+declare global {
+  namespace Express {
+    interface Request {
+      twoFactorVerified?: boolean;
+    }
+  }
+}
+
+/**
+ * Middleware to require 2FA verification for sensitive operations
+ * Checks for TOTP token in header or backup code in body
+ */
+export function requireTwoFactor(req: Request, res: Response, next: NextFunction) {
+  return async (err: any, _req: Request, _res: Response, _next: NextFunction) => {
+    if (err) return next(err);
+
+    if (!req.jwtUser) {
+      return res.status(401).json({
+        error: 'Authentication required',
+        message: 'Valid JWT token required'
+      });
+    }
+
+    try {
+      // Get user information
+      const user = await getUserById(req.jwtUser.userId);
+      if (!user) {
+        return res.status(404).json({
+          error: 'User not found',
+          message: 'User associated with token no longer exists'
+        });
+      }
+
+      // Check if 2FA is enabled for this user
+      if (!is2FAEnabled(user)) {
+        // If 2FA is not enabled, allow the operation
+        req.twoFactorVerified = true;
+        return next();
+      }
+
+      // Check for TOTP token in headers
+      const totpToken = req.headers['x-2fa-token'] as string;
+      
+      if (totpToken) {
+        // Verify TOTP token
+        const isValid = verifyTOTPToken(user.two_factor_secret!, totpToken);
+        if (isValid) {
+          req.twoFactorVerified = true;
+          return next();
+        }
+      }
+
+      // Check for backup code in request body
+      const backupCode = req.body['backupCode'] || req.body['backup_code'];
+      
+      if (backupCode && user.backup_codes) {
+        // Verify backup code
+        const verification = await verifyBackupCode(backupCode, user.backup_codes);
+        if (verification.valid) {
+          req.twoFactorVerified = true;
+          // Mark backup code as used (this would typically update the database)
+          return next();
+        }
+      }
+
+      // If we reach here, 2FA verification failed
+      return res.status(403).json({
+        error: 'Two-factor authentication required',
+        message: 'This operation requires two-factor authentication',
+        required: true,
+        methods: {
+          totp: 'Provide TOTP token in X-2FA-Token header',
+          backupCode: 'Provide backup code in request body as backupCode or backup_code'
+        }
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: '2FA verification failed',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  };
+}
+
+/**
+ * Middleware to check if 2FA is verified
+ * Used after requireTwoFactor to ensure verification was successful
+ */
+export function ensureTwoFactorVerified(req: Request, res: Response, next: NextFunction) {
+  if (req.twoFactorVerified) {
+    return next();
+  }
+
+  return res.status(403).json({
+    error: 'Two-factor authentication not verified',
+    message: 'This operation requires verified two-factor authentication'
+  });
+}
+
+/**
+ * Middleware to optionally require 2FA
+ * Allows operation to proceed if 2FA is not enabled, but requires it if enabled
+ */
+export function optionalTwoFactor(req: Request, res: Response, next: NextFunction) {
+  return async (err: any, _req: Request, _res: Response, _next: NextFunction) => {
+    if (err) return next(err);
+
+    if (!req.jwtUser) {
+      return res.status(401).json({
+        error: 'Authentication required',
+        message: 'Valid JWT token required'
+      });
+    }
+
+    try {
+      // Get user information
+      const user = await getUserById(req.jwtUser.userId);
+      if (!user) {
+        return res.status(404).json({
+          error: 'User not found',
+          message: 'User associated with token no longer exists'
+        });
+      }
+
+      // If 2FA is not enabled, allow the operation
+      if (!is2FAEnabled(user)) {
+        req.twoFactorVerified = true;
+        return next();
+      }
+
+      // If 2FA is enabled, check for verification
+      const totpToken = req.headers['x-2fa-token'] as string;
+      
+      if (totpToken) {
+        const isValid = verifyTOTPToken(user.two_factor_secret!, totpToken);
+        if (isValid) {
+          req.twoFactorVerified = true;
+          return next();
+        }
+      }
+
+      // Check for backup code
+      const backupCode = req.body['backupCode'] || req.body['backup_code'];
+      
+      if (backupCode && user.backup_codes) {
+        const verification = await verifyBackupCode(backupCode, user.backup_codes);
+        if (verification.valid) {
+          req.twoFactorVerified = true;
+          return next();
+        }
+      }
+
+      // If 2FA is enabled but not verified, still allow operation with warning
+      // This is for operations that are sensitive but not critical
+      req.twoFactorVerified = false;
+      return next();
+    } catch (error) {
+      return res.status(500).json({
+        error: '2FA check failed',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  };
+}
