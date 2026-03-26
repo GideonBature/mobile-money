@@ -44,6 +44,8 @@ import { requestId } from "./middleware/requestId";
 import { metricsMiddleware } from "./middleware/metrics";
 import { validateStellarNetwork, logStellarNetwork } from "./config/stellar";
 import { HealthCheckResponse, ReadinessCheckResponse } from "./types/api";
+import stellarRoutes from "./routes/stellar";
+import stellarWebhookRoutes from "./stellar/webhooks";
 
 dotenv.config();
 
@@ -210,6 +212,8 @@ app.use("/api/disputes", disputeRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/kyc", createKYCRoutes(pool));
+app.use("/api/stellar", stellarRoutes);
+app.use("/api/stellar", stellarWebhookRoutes);
 
 app.use(
   (
