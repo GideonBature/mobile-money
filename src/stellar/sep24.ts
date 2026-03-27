@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import { Transaction, Keypair } from "stellar-sdk";
 import { getStellarServer, getNetworkPassphrase, STELLAR_NETWORKS } from "../config/stellar";
@@ -448,7 +449,6 @@ const sep24Router = Router();
 
 // Rate limiter for SEP-24 endpoints
 const sep24Limiter = (() => {
-  const rateLimit = require("express-rate-limit");
   return rateLimit({
     windowMs: 60 * 1000,
     max: 10,

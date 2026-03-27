@@ -1,4 +1,5 @@
 import {
+  Asset,
   Transaction,
   FeeBumpTransaction,
   Keypair,
@@ -357,8 +358,8 @@ export const createSimplePaymentWithFeeBump = async (
   const operation = Operation.payment({
     destination,
     asset: asset === "native" 
-      ? new (require("stellar-sdk").Asset)() 
-      : new (require("stellar-sdk").Asset)(asset.code, asset.issuer),
+      ? Asset.native()
+      : new Asset(asset.code, asset.issuer),
     amount,
   });
 
@@ -382,7 +383,6 @@ export const createTrustAndPaymentWithFeeBump = async (
   amount: string,
   memo?: string
 ): Promise<FeeBumpResult> => {
-  const Asset = require("stellar-sdk").Asset;
   const asset = new Asset(assetCode, assetIssuer);
 
   const operations: Operation[] = [
