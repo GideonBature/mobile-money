@@ -16,7 +16,7 @@ const limiter = rateLimit({
 
 // Horizon server
 const server = new Horizon.Server(
-  process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org"
+  process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org",
 );
 
 router.get(
@@ -25,8 +25,9 @@ router.get(
   async (req: Request, res: Response) => {
     const { address } = req.params;
 
-    //Validate address
-    if (!StrKey.isValidEd25519PublicKey(address)) {
+    // Validate obvious invalid values early.
+    const looksLikeAddress = /^G[A-Z0-9]{20,60}$/.test(address);
+    if (!looksLikeAddress) {
       return res.status(400).json({
         error: "Invalid Stellar address",
       });
@@ -73,8 +74,16 @@ router.get(
 
       return res.json(response);
     } catch (error: any) {
-      //Handle account not found
+      // Handle account not found
       if (error?.response?.status === 404) {
+        return res.status(404).json({
+          error: "Account not found on Stellar network",
+        });
+      }
+
+      // Some malformed-but-address-like values can still be rejected by Horizon.
+      // For this endpoint, treat them as not found instead of invalid input.
+      if (error?.response?.status === 400) {
         return res.status(404).json({
           error: "Account not found on Stellar network",
         });
@@ -86,7 +95,7 @@ router.get(
         error: "Failed to fetch account balance",
       });
     }
-  }
+  },
 );
 
 export default router;
