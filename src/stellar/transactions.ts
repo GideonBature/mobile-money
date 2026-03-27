@@ -420,4 +420,27 @@ export default {
   createTrustAndPaymentWithFeeBump,
   updateFeePayerSequence,
   getFeePayerSequence,
+};export const createSimplePaymentWithFeeBump = async (
+  sourceAccount: string,
+  destination: string,
+  asset: "native" | { code: string; issuer: string },
+  amount: string,
+  memo?: string
+): Promise<FeeBumpResult> => {
+  // Use the Asset class already imported at the top
+  const stellarAsset = asset === "native" 
+    ? Asset.native() 
+    : new Asset(asset.code, asset.issuer);
+
+  const operation = Operation.payment({
+    destination,
+    asset: stellarAsset,
+    amount,
+  });
+
+  return buildTransactionWithFeeBump({
+    sourceAccount,
+    operations: [operation],
+    memo: memo ? Memo.text(memo) : undefined,
+  });
 };
