@@ -3,6 +3,7 @@ import { runAccountMergeJob } from "./accountMerge";
 import { runCleanupJob } from "./cleanupJob";
 import { runReportJob } from "./reportJob";
 import { runStatusCheckJob } from "./statusCheckJob";
+import { runDisputeSlaJob } from "./disputeSlaJob";
 
 interface JobConfig {
   name: string;
