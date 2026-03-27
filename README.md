@@ -15,6 +15,8 @@ A backend service that bridges mobile money providers (MTN, Airtel, Orange) with
 - Redis (for queues and locking)
 - Background processing (BullMQ)
 - Email notifications (Nodemailer)
+- **No-code webhook integration (Zapier/Make.com)**
+- Email notifications (SendGrid)
 - Docker support
 - TypeScript
 
@@ -79,9 +81,6 @@ npm start
 ```bash
 docker-compose up
 ```
-
-This also starts Elasticsearch, Logstash, Filebeat, and Kibana for structured
-log indexing. See [ELK stack guide](./docs/ELK_STACK.md).
 
 ### Docker (Development)
 
@@ -377,7 +376,6 @@ git commit -m "Your message" --no-verify
 ## API Endpoints
 
 ## System Architecture
-
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ### Health Checks
