@@ -10,6 +10,7 @@ import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { getQueueStats } from "../queue/transactionQueue";
 import { redisClient } from "../config/redis";
 import { checkReplicaHealth } from "../config/database";
+import { UserModel } from "../models/users";
 
 const router = Router();
 const IMPERSONATION_TOKEN_EXPIRES_IN = "15m";
@@ -307,6 +308,180 @@ router.post(
   },
 );
 
+// POST /api/admin/users/:id/freeze
+router.post(
+  "/users/:id/freeze",
+  requireAdmin,
+  logAdminAction("FREEZE_USER"),
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.params.id;
+      const { reason } = req.body;
+      const adminUser = (req as AuthRequest).user;
+
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      // Validate reason
+      if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
+        return res.status(400).json({ 
+          message: "A reason is required for freezing an account" 
+        });
+      }
+
+      const userModel = new UserModel();
+      
+      // Check if user exists
+      const user = await userModel.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if already frozen
+      if (user.status === "frozen") {
+        return res.status(400).json({ 
+          message: "User account is already frozen" 
+        });
+      }
+
+      // Freeze the user
+      const updatedUser = await userModel.updateStatus(
+        userId,
+        "frozen",
+        adminUser.id,
+        reason.trim(),
+        req.ip,
+        req.get("user-agent")
+      );
+
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to freeze user account" });
+      }
+
+      console.log(`[ADMIN] User account frozen: ${userId}`, {
+        adminId: adminUser.id,
+        targetUserId: userId,
+        reason: reason.trim(),
+        timestamp: new Date().toISOString(),
+      });
+
+      res.json({ 
+        message: "User account frozen successfully",
+        user: {
+          id: updatedUser.id,
+          status: updatedUser.status,
+        }
+      });
+    } catch (error) {
+      console.error("Error freezing user account:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  },
+);
+
+// POST /api/admin/users/:id/unfreeze
+router.post(
+  "/users/:id/unfreeze",
+  requireAdmin,
+  logAdminAction("UNFREEZE_USER"),
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.params.id;
+      const { reason } = req.body;
+      const adminUser = (req as AuthRequest).user;
+
+      if (!adminUser) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      // Validate reason
+      if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
+        return res.status(400).json({ 
+          message: "A reason is required for unfreezing an account" 
+        });
+      }
+
+      const userModel = new UserModel();
+      
+      // Check if user exists
+      const user = await userModel.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if not frozen
+      if (user.status !== "frozen") {
+        return res.status(400).json({ 
+          message: "User account is not frozen" 
+        });
+      }
+
+      // Unfreeze the user
+      const updatedUser = await userModel.updateStatus(
+        userId,
+        "active",
+        adminUser.id,
+        reason.trim(),
+        req.ip,
+        req.get("user-agent")
+      );
+
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to unfreeze user account" });
+      }
+
+      console.log(`[ADMIN] User account unfrozen: ${userId}`, {
+        adminId: adminUser.id,
+        targetUserId: userId,
+        reason: reason.trim(),
+        timestamp: new Date().toISOString(),
+      });
+
+      res.json({ 
+        message: "User account unfrozen successfully",
+        user: {
+          id: updatedUser.id,
+          status: updatedUser.status,
+        }
+      });
+    } catch (error) {
+      console.error("Error unfreezing user account:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  },
+);
+
+// GET /api/admin/users/:id/status-history
+router.get(
+  "/users/:id/status-history",
+  requireAdmin,
+  logAdminAction("GET_USER_STATUS_HISTORY"),
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.params.id;
+      const userModel = new UserModel();
+      
+      // Check if user exists
+      const user = await userModel.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const auditHistory = await userModel.getAuditHistory(userId);
+
+      res.json({
+        userId: user.id,
+        currentStatus: user.status,
+        history: auditHistory,
+      });
+    } catch (error) {
+      console.error("Error fetching user status history:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  },
+);
+
 /**
  * =========================
  * DASHBOARD CONFIGURATION
@@ -417,7 +592,6 @@ router.patch(
   updateAdminNotesHandler,
 );
 
-export const adminRoutes = router;
 /**
  * =========================
  * HEALTH & MONITORING
